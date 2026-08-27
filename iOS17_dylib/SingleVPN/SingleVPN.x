@@ -905,51 +905,6 @@ static void svpnDumpSpringBoardStatusRuntimeOnce(void);
 
 %end // SingleVPN_BreadcrumbDiagnostic
 
-%group SingleVPN_STUIBreadcrumbDiagnostic
-
-%hook STUIStatusBarImageView
-
-- (void)didMoveToWindow {
-    %orig;
-    if (self.window) {
-        svpnBreadcrumbLog(@"status image attached view=%p frame=%@ image=%@ window=%@ chain=%@",
-            self, NSStringFromCGRect(self.frame), svpnSingleLineDescription(self.image, 1200),
-            NSStringFromClass(self.window.class), svpnSuperviewChain(self));
-    }
-}
-
-- (void)layoutSubviews {
-    %orig;
-    NSString *signature = [NSString stringWithFormat:@"%@|%@|%@", NSStringFromCGRect(self.frame),
-        NSStringFromClass(self.window.class), svpnSingleLineDescription(self.image, 500)];
-    NSString *previous = objc_getAssociatedObject(self, @selector(layoutSubviews));
-    if (self.window && ![previous isEqualToString:signature]) {
-        objc_setAssociatedObject(self, @selector(layoutSubviews), signature, OBJC_ASSOCIATION_COPY_NONATOMIC);
-        svpnBreadcrumbLog(@"status image layout view=%p frame=%@ image=%@ window=%@ chain=%@",
-            self, NSStringFromCGRect(self.frame), svpnSingleLineDescription(self.image, 1200),
-            NSStringFromClass(self.window.class), svpnSuperviewChain(self));
-    }
-}
-
-%end
-
-%hook STUIStatusBar
-
-- (void)layoutSubviews {
-    %orig;
-    NSNumber *logged = objc_getAssociatedObject(self, @selector(layoutSubviews));
-    if (!logged.boolValue) {
-        objc_setAssociatedObject(self, @selector(layoutSubviews), @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-        svpnBreadcrumbLog(@"status bar first layout view=%p frame=%@ window=%@", self,
-            NSStringFromCGRect(self.frame), NSStringFromClass(self.window.class));
-        svpnLogStatusBarCollections(self);
-    }
-}
-
-%end
-
-%end // SingleVPN_STUIBreadcrumbDiagnostic
-
 %group SingleVPN_AppBreadcrumbDiagnostic
 
 %hook UIStatusBarBreadcrumbItemView

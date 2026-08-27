@@ -98,3 +98,11 @@ PhoenixVideoAdSkip 1.1.1 正在修正“商城”Tab 实际路由到福利页导
 - 各项目的 `packages`、`.theos`、deb、IPA、日志和其他构建缓存
 
 处理这些内容前先确认用途，避免污染 Git 历史或公开敏感分析材料。
+
+## SingleVPN v2.1-46 状态栏返回按钮定位
+
+- iPhone 15 Pro（iPhone16,1）、iOS 17.0（21A327）的完整 arm64e dyld shared cache 已在本地只读分析。
+- `SBDeviceApplicationSceneStatusBarBreadcrumbProvider` 位于 SpringBoard，负责生成返回动作；最终可见控件是 UIKitCore 的 `UIStatusBarBreadcrumbItemView`，继承 `UIStatusBarSystemNavigationItemView`，内部持有 `UIButton`。
+- v2.1-46 改为仅在 SpringBoard 精确 Hook `UIStatusBarBreadcrumbItemView`，将设置的纵向偏移应用于内部按钮 transform，不移动整个状态栏。
+- 新私有仓库提交 `ab5ffe4b`；GitHub Actions run `33060278809` 的 rootfull、rootless、roothide 均构建成功。
+- rootless 测试包：`C:\Users\liqiang\Downloads\com.82flex.singlevpn_2.1-46_iphoneos-arm64.deb`。

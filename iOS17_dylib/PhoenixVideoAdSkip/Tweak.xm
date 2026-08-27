@@ -3,6 +3,19 @@
 #import <objc/message.h>
 #import <math.h>
 
+static NSString *const kPVALogName = @"PhoenixVideoAdSkip.log";
+
+static void PVALog(NSString *format, ...) {
+    va_list args; va_start(args, format);
+    NSString *message = [[NSString alloc] initWithFormat:format arguments:args]; va_end(args);
+    NSString *documents = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES).firstObject;
+    NSString *path = [documents stringByAppendingPathComponent:kPVALogName];
+    NSData *data = [[NSString stringWithFormat:@"%.3f %@\n", NSDate.date.timeIntervalSince1970, message] dataUsingEncoding:NSUTF8StringEncoding];
+    if (![[NSFileManager defaultManager] fileExistsAtPath:path]) { [data writeToFile:path atomically:YES]; return; }
+    NSFileHandle *handle = [NSFileHandle fileHandleForWritingAtPath:path];
+    [handle seekToEndOfFile]; [handle writeData:data]; [handle closeFile];
+}
+
 static BOOL PVAIsShopMallTitle(NSString *title) {
     return [title isKindOfClass:NSString.class] && [title isEqualToString:@"商城"];
 }
@@ -32,6 +45,39 @@ static void PVACollectTitleContainers(UIView *view, UIView *root, NSMutableArray
     for (UIView *child in view.subviews) PVACollectTitleContainers(child, root, containers);
 }
 
+static UIView *PVAClosestTabButton(UIView *view, UIView *root) {
+    UIView *candidate = view;
+    while (candidate && candidate != root) {
+        if ([candidate isKindOfClass:UIControl.class]) return candidate;
+        candidate = candidate.superview;
+    }
+    return PVADirectChildContainingView(view, root);
+}
+
+static NSString *PVATabName(id controller, id type) {
+    SEL selector = NSSelectorFromString(@"getTabbarItemNameWithType:");
+    if (![controller respondsToSelector:selector] || ![type respondsToSelector:@selector(intValue)]) return nil;
+    return ((id (*)(id, SEL, int))objc_msgSend)(controller, selector, [type intValue]);
+}
+
+static UIView *PVATabButton(id controller, id type) {
+    SEL selector = NSSelectorFromString(@"getTabBarItemButtonWithType:");
+    if (![controller respondsToSelector:selector] || ![type respondsToSelector:@selector(intValue)]) return nil;
+    id button = ((id (*)(id, SEL, int))objc_msgSend)(controller, selector, [type intValue]);
+    return [button isKindOfClass:UIView.class] ? button : nil;
+}
+
+static void PVADumpTabInventory(id controller) {
+    SEL typeSelector = NSSelectorFromString(@"typeArray");
+    NSArray *types = [controller respondsToSelector:typeSelector] ? ((id (*)(id, SEL))objc_msgSend)(controller, typeSelector) : nil;
+    PVALog(@"TAB inventory types=%@", types);
+    for (id type in types) {
+        UIView *button = PVATabButton(controller, type);
+        PVALog(@"TAB type=%@ name=%@ button=%@ frame=%@ hidden=%d", type, PVATabName(controller, type),
+               NSStringFromClass(button.class), NSStringFromCGRect(button.frame), button.hidden);
+    }
+}
+
 static void PVACleanupVisibleShopMallTab(UITabBarController *tabController) {
     UIView *root = nil;
     SEL visibleSelector = NSSelectorFromString(@"topVisibleTabBar");
@@ -41,7 +87,15 @@ static void PVACleanupVisibleShopMallTab(UITabBarController *tabController) {
     if (![root isKindOfClass:UIView.class]) root = tabController.tabBar;
 
     UILabel *shopLabel = PVAFindShopMallLabel(root);
-    UIView *shopContainer = PVADirectChildContainingView(shopLabel, root);
+    UIView *shopContainer = PVAClosestTabButton(shopLabel, root);
+
+    SEL typeSelector = NSSelectorFromString(@"typeArray");
+    NSArray *types = [(id)tabController respondsToSelector:typeSelector] ? ((id (*)(id, SEL))objc_msgSend)(tabController, typeSelector) : nil;
+    for (id type in types) {
+        if (!PVAIsShopMallTitle(PVATabName(tabController, type))) continue;
+        UIView *nativeButton = PVATabButton(tabController, type);
+        if (nativeButton) shopContainer = nativeButton;
+    }
     if (!shopContainer || root.bounds.size.width <= 0) return;
 
     NSMutableArray<UIView *> *allContainers = [NSMutableArray array];
@@ -59,6 +113,8 @@ static void PVACleanupVisibleShopMallTab(UITabBarController *tabController) {
 
     shopContainer.hidden = YES;
     shopContainer.userInteractionEnabled = NO;
+    PVALog(@"TAB hide shop class=%@ frame=%@ root=%@", NSStringFromClass(shopContainer.class),
+           NSStringFromCGRect(shopContainer.frame), NSStringFromClass(root.class));
     [row removeObject:shopContainer];
     CGFloat width = root.bounds.size.width / row.count;
     for (NSUInteger index = 0; index < row.count; index++) {
@@ -106,6 +162,7 @@ static void PVACleanupVisibleShopMallTab(UITabBarController *tabController) {
 - (void)viewDidAppear:(BOOL)animated {
     %orig;
     UITabBarController *tabController = (UITabBarController *)self;
+    PVADumpTabInventory(self);
     dispatch_async(dispatch_get_main_queue(), ^{
         PVACleanupVisibleShopMallTab(tabController);
     });
@@ -117,3 +174,11 @@ static void PVACleanupVisibleShopMallTab(UITabBarController *tabController) {
 }
 
 %end
+
+%ctor {
+    @autoreleasepool {
+        if ([NSBundle.mainBundle.bundleIdentifier isEqualToString:@"com.phoenix.video"]) {
+            PVALog(@"START version=1.1.3 tab diagnostics");
+        }
+    }
+}

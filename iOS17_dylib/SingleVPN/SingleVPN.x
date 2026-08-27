@@ -94,6 +94,8 @@ static dispatch_source_t _settingsOverlayTimer = nil;
 static BOOL _settingsRootVisible = NO;
 static NSHashTable<UIView *> *_breadcrumbViews = nil;
 
+static void svpnApplyBreadcrumbOffset(UIView *view);
+
 static NSString *const SVPNTrafficBaselinesKey = @"TrafficBaselines";
 static NSString *const SVPNCellularDownloadKey = @"TrafficCellularDownload";
 static NSString *const SVPNCellularUploadKey = @"TrafficCellularUpload";
@@ -207,6 +209,22 @@ static NSString *svpnSuperviewChain(UIView *view) {
         [parts addObject:[NSString stringWithFormat:@"%@:%@", NSStringFromClass(current.class), NSStringFromCGRect(current.frame)]];
     }
     return [parts componentsJoinedByString:@" <- "];
+}
+
+static BOOL svpnIsStatusBarNavigationText(NSString *text) {
+    return text.length > 0 && [text rangeOfString:@"◀"].location != NSNotFound;
+}
+
+static void svpnApplyStatusBarNavigationOffset(STUIStatusBarStringView *view) {
+    if (!view || !svpnIsStatusBarNavigationText(view.text)) return;
+    CGFloat offset = _isEnabled ? _breadcrumbVerticalOffset : 0.0;
+    svpnApplyBreadcrumbOffset(view);
+    NSNumber *lastOffset = objc_getAssociatedObject(view, @selector(svpnApply5GAdvancedAttributesIfNeeded));
+    if (!lastOffset || fabs(lastOffset.doubleValue - offset) > 0.01) {
+        objc_setAssociatedObject(view, @selector(svpnApply5GAdvancedAttributesIfNeeded), @(offset), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        svpnBreadcrumbLog(@"navigation offset applied text=%@ frame=%@ offset=%.2f enabled=%d",
+            view.text ?: @"", NSStringFromCGRect(view.frame), offset, _isEnabled);
+    }
 }
 
 static void svpnLogObjectIvars(id object) {
@@ -823,6 +841,12 @@ static void ReloadPrefs() {
     }
 
     [self svpnApply5GAdvancedAttributesIfNeeded];
+    svpnApplyStatusBarNavigationOffset(self);
+}
+
+- (void)layoutSubviews {
+    %orig;
+    svpnApplyStatusBarNavigationOffset(self);
 }
 
 %end
@@ -1092,13 +1116,7 @@ static void svpnInstallBreadcrumbDiagnostic(NSUInteger attempt) {
         return;
     }
 
-    svpnBreadcrumbLog(@"loaded version=2.1-48 bundle=%@ enabled=%d offset=%.2f", bundleIdentifier, _isEnabled, _breadcrumbVerticalOffset);
-    %init(SingleVPN_STUIBreadcrumbDiagnostic);
-    svpnInstallAppBreadcrumbDiagnostic(0);
-    svpnInstallBreadcrumbDiagnostic(0);
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        svpnDumpSpringBoardNavigationClasses();
-    });
+    svpnBreadcrumbLog(@"loaded version=2.1-49 bundle=%@ enabled=%d offset=%.2f", bundleIdentifier, _isEnabled, _breadcrumbVerticalOffset);
 
     svpnStartTrafficTimer();
     CFNotificationCenterAddObserver(

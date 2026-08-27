@@ -17,7 +17,8 @@ static void PVALog(NSString *format, ...) {
 }
 
 static BOOL PVAIsShopMallTitle(NSString *title) {
-    return [title isKindOfClass:NSString.class] && [title isEqualToString:@"商城"];
+    if (![title isKindOfClass:NSString.class]) return NO;
+    return [title isEqualToString:@"商城"] || [title caseInsensitiveCompare:@"mall"] == NSOrderedSame;
 }
 
 static UILabel *PVAFindShopMallLabel(UIView *view) {
@@ -91,10 +92,35 @@ static void PVACleanupVisibleShopMallTab(UITabBarController *tabController) {
 
     SEL typeSelector = NSSelectorFromString(@"typeArray");
     NSArray *types = [(id)tabController respondsToSelector:typeSelector] ? ((id (*)(id, SEL))objc_msgSend)(tabController, typeSelector) : nil;
+    NSMutableArray<UIView *> *nativeButtons = [NSMutableArray array];
     for (id type in types) {
-        if (!PVAIsShopMallTitle(PVATabName(tabController, type))) continue;
         UIView *nativeButton = PVATabButton(tabController, type);
-        if (nativeButton) shopContainer = nativeButton;
+        if (nativeButton && ![nativeButtons containsObject:nativeButton]) [nativeButtons addObject:nativeButton];
+        if (PVAIsShopMallTitle(PVATabName(tabController, type)) && nativeButton) shopContainer = nativeButton;
+    }
+
+    if (shopContainer && nativeButtons.count >= 5) {
+        [nativeButtons sortUsingComparator:^NSComparisonResult(UIView *left, UIView *right) {
+            CGFloat leftX = CGRectGetMinX(left.frame), rightX = CGRectGetMinX(right.frame);
+            return leftX < rightX ? NSOrderedAscending : (leftX > rightX ? NSOrderedDescending : NSOrderedSame);
+        }];
+        shopContainer.hidden = YES;
+        shopContainer.userInteractionEnabled = NO;
+        [nativeButtons removeObject:shopContainer];
+        CGFloat availableWidth = CGRectGetMaxX(((UIView *)nativeButtons.lastObject).frame);
+        if (availableWidth <= 0) availableWidth = root.bounds.size.width;
+        CGFloat width = availableWidth / nativeButtons.count;
+        for (NSUInteger index = 0; index < nativeButtons.count; index++) {
+            UIView *button = nativeButtons[index];
+            button.hidden = NO;
+            button.userInteractionEnabled = YES;
+            CGRect frame = button.frame;
+            frame.origin.x = width * index;
+            frame.size.width = width;
+            button.frame = frame;
+        }
+        PVALog(@"TAB native mall hidden type=5 remaining=%@ width=%.2f", nativeButtons, width);
+        return;
     }
     if (!shopContainer || root.bounds.size.width <= 0) return;
 
@@ -178,7 +204,7 @@ static void PVACleanupVisibleShopMallTab(UITabBarController *tabController) {
 %ctor {
     @autoreleasepool {
         if ([NSBundle.mainBundle.bundleIdentifier isEqualToString:@"com.phoenix.video"]) {
-            PVALog(@"START version=1.1.3 tab diagnostics");
+            PVALog(@"START version=1.1.4 native mall removal");
         }
     }
 }

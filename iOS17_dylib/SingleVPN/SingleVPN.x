@@ -235,12 +235,13 @@ static void svpnApplyStatusBarNavigationOffset(STUIStatusBarStringView *view) {
     view.layer.masksToBounds = NO;
     CGFloat offset = _isEnabled ? _breadcrumbVerticalOffset : 0.0;
     CGRect bounds = view.bounds;
-    bounds.origin.y = -offset;
+    bounds.origin.y = 0.0;
     view.bounds = bounds;
+    view.layer.transform = CATransform3DMakeTranslation(0.0, offset, 0.0);
     NSNumber *lastOffset = objc_getAssociatedObject(view, @selector(svpnApply5GAdvancedAttributesIfNeeded));
     if (!lastOffset || fabs(lastOffset.doubleValue - offset) > 0.01) {
         objc_setAssociatedObject(view, @selector(svpnApply5GAdvancedAttributesIfNeeded), @(offset), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-        svpnBreadcrumbLog(@"navigation offset applied text=%@ frame=%@ offset=%.2f enabled=%d",
+        svpnBreadcrumbLog(@"navigation layer offset applied text=%@ frame=%@ offset=%.2f enabled=%d",
             view.text ?: @"", NSStringFromCGRect(view.frame), offset, _isEnabled);
     }
 }
@@ -1105,7 +1106,7 @@ static void svpnInstallBreadcrumbDiagnostic(NSUInteger attempt) {
         return;
     }
 
-    svpnBreadcrumbLog(@"loaded version=2.1-54 bundle=%@ enabled=%d offset=%.2f", bundleIdentifier, _isEnabled, _breadcrumbVerticalOffset);
+    svpnBreadcrumbLog(@"loaded version=2.1-55 bundle=%@ enabled=%d offset=%.2f", bundleIdentifier, _isEnabled, _breadcrumbVerticalOffset);
 
     svpnStartTrafficTimer();
     CFNotificationCenterAddObserver(

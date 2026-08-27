@@ -1,6 +1,7 @@
 #import <Foundation/Foundation.h>
 #import <UIKit/UIKit.h>
 #import <Photos/Photos.h>
+#import <objc/message.h>
 
 @interface ACCRecordFlowComponent : NSObject
 - (void)restoreRecordButtonState;
@@ -22,8 +23,10 @@ static NSString *const kACELivePhotoDefaultKey = @"ACELivePhotoDefaultEnabled";
 static NSString *const kACEPhotoSaveKey = @"ACEPhotoAutoSaveEnabled";
 static __weak UIViewController *gACECameraController;
 static NSUInteger gACECameraEntryCount = 0;
-static NSTimeInterval gACEProtectCameraUntil = 0;
 static __weak ACCRealLivePhotoServiceImpl *gACELivePhotoService;
+static __weak id gACESystemLivePhotoService;
+static NSUInteger gACEStillCaptureGeneration = 0;
+static NSUInteger gACELiveCallbackGeneration = 0;
 
 static BOOL ACEEnabled(NSString *key) {
     NSUserDefaults *defaults = NSUserDefaults.standardUserDefaults;
@@ -61,7 +64,6 @@ static UIViewController *ACETopController(void) {
 static void ACETraceCameraEntry(NSString *source) {
     NSUInteger entry = ++gACECameraEntryCount;
     ACELog(@"ENTRY #%lu source=%@ top-now=%@", (unsigned long)entry, source, NSStringFromClass(ACETopController().class));
-    if (entry == 1) gACEProtectCameraUntil = NSDate.date.timeIntervalSince1970 + 3.0;
     for (NSNumber *delay in @[@0.25, @0.75, @1.5, @3.0]) {
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(delay.doubleValue * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
             UIViewController *top = ACETopController();
@@ -266,13 +268,31 @@ static void ACEInstallSettingsEntry(UIViewController *controller) {
 
 %hook ACCRecordSystemLivePhotoServiceImpl
 - (BOOL)systemLivePhotoOpened {
+    gACESystemLivePhotoService = self;
     BOOL original = %orig;
     BOOL enabled = ACEEnabled(kACELivePhotoDefaultKey) ? YES : original;
     ACELog(@"LIVE system-opened original=%d result=%d", original, enabled);
     return enabled;
 }
 - (void)takeLivePhotoPicture {
+    gACESystemLivePhotoService = self;
     ACELog(@"LIVE native service take-picture");
+    %orig;
+}
+%end
+
+%hook ACCPictureFlowComponent
+- (void)tryTakePicture {
+    if (ACEEnabled(kACELivePhotoDefaultKey)) {
+        id service = ACEValue(self, @"systemLivePhotoService") ?: gACESystemLivePhotoService;
+        SEL selector = NSSelectorFromString(@"takeLivePhotoPicture");
+        if ([service respondsToSelector:selector]) {
+            ACELog(@"LIVE redirect picture flow service=%@", NSStringFromClass([service class]));
+            ((void (*)(id, SEL))objc_msgSend)(service, selector);
+            return;
+        }
+        ACELog(@"LIVE redirect unavailable system-service=%@", NSStringFromClass([service class]));
+    }
     %orig;
 }
 %end
@@ -295,9 +315,24 @@ static void ACEInstallSettingsEntry(UIViewController *controller) {
 }
 - (void)onCaptureStillImageWithImage:(id)image error:(NSError *)error {
     gACECameraController = ACETopController(); %orig;
-    if (ACEEnabled(kACEPhotoSaveKey) && !ACEEnabled(kACELivePhotoDefaultKey) && !error && [image isKindOfClass:UIImage.class]) ACESaveStatic(image, self);
+    if (!ACEEnabled(kACEPhotoSaveKey) || error || ![image isKindOfClass:UIImage.class]) return;
+    if (!ACEEnabled(kACELivePhotoDefaultKey)) {
+        ACESaveStatic(image, self);
+        return;
+    }
+    NSUInteger token = ++gACEStillCaptureGeneration;
+    NSUInteger liveGeneration = gACELiveCallbackGeneration;
+    UIImage *fallbackImage = image;
+    ACELog(@"LIVE still callback waiting paired token=%lu", (unsigned long)token);
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        if (token == gACEStillCaptureGeneration && liveGeneration == gACELiveCallbackGeneration) {
+            ACELog(@"LIVE paired callback timeout; save static fallback token=%lu", (unsigned long)token);
+            ACESaveStatic(fallbackImage, self);
+        }
+    });
 }
 - (void)flowServiceDidSystemLivePhotoWithPicture:(id)picture {
+    gACELiveCallbackGeneration++;
     ACELog(@"LIVE captured class=%@ value=%@", NSStringFromClass([picture class]), picture); %orig;
     if (ACEEnabled(kACEPhotoSaveKey) && !ACESaveLive(picture, self)) ACELog(@"LIVE paired asset unavailable; static fallback intentionally skipped");
 }
@@ -335,32 +370,4 @@ static void ACEInstallSettingsEntry(UIViewController *controller) {
 %end
 
 
-static BOOL ACEShouldProtectRecorderDismiss(UIViewController *controller) {
-    if (NSDate.date.timeIntervalSince1970 > gACEProtectCameraUntil) return NO;
-    NSString *selfClass = NSStringFromClass(controller.class);
-    NSString *presentedClass = NSStringFromClass(controller.presentedViewController.class);
-    return [selfClass isEqualToString:@"AWERecorderViewController"] ||
-           [presentedClass isEqualToString:@"AWERecorderViewController"];
-}
-
-%hook AWERecorderViewController
-- (void)dismissViewControllerAnimated:(BOOL)animated completion:(id)completion {
-    if (ACEShouldProtectRecorderDismiss((UIViewController *)self)) {
-        ACELog(@"ENTRY blocked recorder self-dismiss stack=%@", NSThread.callStackSymbols);
-        return;
-    }
-    %orig;
-}
-%end
-
-%hook AWEFeedRootViewController
-- (void)dismissViewControllerAnimated:(BOOL)animated completion:(id)completion {
-    if (ACEShouldProtectRecorderDismiss((UIViewController *)self)) {
-        ACELog(@"ENTRY blocked feed dismiss stack=%@", NSThread.callStackSymbols);
-        return;
-    }
-    %orig;
-}
-%end
-
-%ctor { @autoreleasepool { if ([NSBundle.mainBundle.bundleIdentifier isEqualToString:@"com.ss.iphone.ugc.Aweme"]) ACELog(@"START version=1.2.3 targeted diagnostics"); } }
+%ctor { @autoreleasepool { if ([NSBundle.mainBundle.bundleIdentifier isEqualToString:@"com.ss.iphone.ugc.Aweme"]) ACELog(@"START version=1.2.4 native picture flow"); } }

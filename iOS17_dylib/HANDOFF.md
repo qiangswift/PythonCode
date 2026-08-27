@@ -168,3 +168,12 @@ PhoenixVideoAdSkip 1.1.1 正在修正“商城”Tab 实际路由到福利页导
 - 设置页流量摘要的最右侧锚定到屏幕宽度 80.5%（iPhone 15 Pro 状态栏 WiFi 图标中心垂线），内容长度变化时向左扩展。
 - 私有仓库提交：`a4dc0638`；GitHub Actions run `33066569437` 的 rootfull、rootless、roothide 均构建成功。
 - rootless 测试包：`C:\Users\liqiang\Downloads\com.82flex.singlevpn_2.1-56_iphoneos-arm64.deb`。
+
+## SingleVPN 2.2.0 稳定版
+
+- 用户实机确认 v2.1-56 的返回文字 CALayer 偏移、流量数值右对齐及 WiFi 垂线锚定效果正确。
+- 稳定版保留已验证功能，删除约 379 行诊断代码，包括日志文件写入、运行时类/方法扫描、provider 探针、视图树遍历、延迟重试及旧 breadcrumb Hook。
+- 返回文字纵向偏移的全新默认值为 `+7.6`；已有用户保存值不会被覆盖。
+- 安装脚本只清理历史调试文件 `com.82flex.singlevpn.breadcrumb.log` 与 `SingleVPNBreadcrumb.log`，正式版不再生成这些日志。
+- 私有仓库提交：`ff0b00f7`；GitHub Actions run `33067785744` 的 rootfull、rootless、roothide 及 Release 均成功。
+- rootless 正式包：`C:\Users\liqiang\Downloads\com.82flex.singlevpn_2.2.0_iphoneos-arm64.deb`。

@@ -1,6 +1,6 @@
 # iOS17_dylib 项目交接
 
-最后更新：2026-08-26
+最后更新：2026-08-27
 
 ## 统一工作目录
 
@@ -24,7 +24,9 @@
 
 ## Git 仓库关系
 
-父仓库：`swiftss/PythonCode`，分支 `main`，仓库保持私有。
+当前用于 iOS 插件构建的新私有仓库：`qiangswift/PythonCode`，分支 `main`。该仓库采用当前 `iOS17_dylib` 项目快照，不包含旧仓库的大体积历史。
+
+旧父仓库：`swiftss/PythonCode`，本地仍保留其历史和远程。
 
 父仓库直接跟踪并已迁移到新路径的项目：
 
@@ -54,7 +56,9 @@
 - `singlevpn-build.yml`
 - `zhixing-update-blocker.yml`
 
-当前 GitHub-hosted Actions 仍受账户计费/预算锁限制，任务会在 Runner 启动前失败。该问题与项目路径或编译代码无关。在账户限制解除前，不要把失败误判为编译错误。
+`qiangswift` 账号的 GitHub-hosted Actions 可正常运行。2026-08-27 已成功编译 AwemeCameraEnhancer、PhoenixVideoAdSkip、LechengSplashSkip、ChinaMobileSplashAdBlocker 和 ZhixingUpdateBlocker。
+
+PhoenixVideoAdSkip 1.1.1 正在修正“商城”Tab 实际路由到福利页导致按控制器过滤未命中的问题；新策略会同步过滤底栏类型、可见性和最终呈现下标。
 
 ## SingleVPN 当前状态
 

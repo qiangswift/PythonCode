@@ -236,19 +236,34 @@ static void ACEInstallSettingsEntry(UIViewController *controller) {
 %end
 
 %hook AWEGeneralSettingViewController
-- (void)viewDidAppear:(BOOL)animated { %orig; ACEInstallSettingsEntry((UIViewController *)self); }
+- (void)viewDidAppear:(BOOL)animated {
+    %orig;
+    ACEInstallSettingsEntry((UIViewController *)self);
+}
 %end
 %hook AWESettingsTableViewController
-- (void)viewDidAppear:(BOOL)animated { %orig; ACEInstallSettingsEntry((UIViewController *)self); }
+- (void)viewDidAppear:(BOOL)animated {
+    %orig;
+    ACEInstallSettingsEntry((UIViewController *)self);
+}
 %end
 %hook AWESettingPageBaseController
-- (void)viewDidAppear:(BOOL)animated { %orig; ACEInstallSettingsEntry((UIViewController *)self); }
+- (void)viewDidAppear:(BOOL)animated {
+    %orig;
+    ACEInstallSettingsEntry((UIViewController *)self);
+}
 %end
 %hook AWESettingBaseViewController
-- (void)viewDidAppear:(BOOL)animated { %orig; ACEInstallSettingsEntry((UIViewController *)self); }
+- (void)viewDidAppear:(BOOL)animated {
+    %orig;
+    ACEInstallSettingsEntry((UIViewController *)self);
+}
 %end
 %hook _TtC7FlowKit24AppSettingViewController
-- (void)viewDidAppear:(BOOL)animated { %orig; ACEInstallSettingsEntry((UIViewController *)self); }
+- (void)viewDidAppear:(BOOL)animated {
+    %orig;
+    ACEInstallSettingsEntry((UIViewController *)self);
+}
 %end
 
 %ctor { @autoreleasepool { if ([NSBundle.mainBundle.bundleIdentifier isEqualToString:@"com.ss.iphone.ugc.Aweme"]) ACELog(@"START version=1.2.0"); } }

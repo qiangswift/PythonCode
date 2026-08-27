@@ -2,6 +2,7 @@
 #import <UIKit/UIKit.h>
 #import <Photos/Photos.h>
 #import <objc/message.h>
+#import <objc/runtime.h>
 
 @interface ACCRecordSystemLivePhotoServiceImpl : NSObject
 - (void)setEnableSystemLivePhoto:(BOOL)enabled;
@@ -17,6 +18,7 @@ static NSString *const kACEVideoDefaultKey = @"ACEVideoDefaultEnabled";
 static NSString *const kACEUnlimitedDurationKey = @"ACEUnlimitedDurationEnabled";
 static NSString *const kACELivePhotoDefaultKey = @"ACELivePhotoDefaultEnabled";
 static NSString *const kACEPhotoSaveKey = @"ACEPhotoAutoSaveEnabled";
+static NSString *const kACERightButtonsOffsetKey = @"ACERightButtonsVerticalOffset";
 static __weak UIViewController *gACECameraController;
 static __weak ACCRecordSystemLivePhotoServiceImpl *gACESystemLivePhotoService;
 static __weak ACCVideoEditFlowControlComponent *gACEEditFlowControl;
@@ -31,6 +33,30 @@ static BOOL ACEEnabled(NSString *key) {
 }
 
 #define ACELog(...) do { } while (0)
+
+static CGFloat ACERightButtonsOffset(void) {
+    NSUserDefaults *defaults = NSUserDefaults.standardUserDefaults;
+    return [defaults objectForKey:kACERightButtonsOffsetKey] == nil ? 8.0 : [defaults doubleForKey:kACERightButtonsOffsetKey];
+}
+
+static NSHashTable<UIView *> *ACERightButtonViews(void) {
+    static NSHashTable<UIView *> *views;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{ views = [NSHashTable weakObjectsHashTable]; });
+    return views;
+}
+
+static void ACEApplyRightButtonsOffset(UIView *view) {
+    if (!view) return;
+    [ACERightButtonViews() addObject:view];
+    CGAffineTransform transform = view.transform;
+    transform.ty = -ACERightButtonsOffset();
+    view.transform = transform;
+}
+
+static void ACERefreshRightButtonsOffset(void) {
+    for (UIView *view in ACERightButtonViews().allObjects) ACEApplyRightButtonsOffset(view);
+}
 
 static UIViewController *ACETopController(void) {
     UIWindow *window = nil;
@@ -188,13 +214,23 @@ static void ACEWaitForNativeLiveSources(id owner, NSUInteger attempt) {
 - (instancetype)init { return [super initWithStyle:UITableViewStyleInsetGrouped]; }
 - (void)viewDidLoad { [super viewDidLoad]; self.title = @"相机增强"; [self.tableView registerClass:UITableViewCell.class forCellReuseIdentifier:@"cell"]; }
 - (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView { return 1; }
-- (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section { return 4; }
+- (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section { return 5; }
 - (NSString *)tableView:(UITableView *)tableView titleForHeaderInSection:(NSInteger)section { return @"拍摄设置"; }
 - (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section { return @"设置立即保存，重新进入拍摄页后完整生效。最长录制为24小时，仍受存储和系统限制。"; }
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)path {
     NSArray *titles = @[@"进入时默认视频", @"视频最长录制24小时", @"默认开启动态照片", @"动态照片自动保存并返回"];
     NSArray *keys = @[kACEVideoDefaultKey, kACEUnlimitedDurationKey, kACELivePhotoDefaultKey, kACEPhotoSaveKey];
     UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:@"cell" forIndexPath:path];
+    if (path.row == 4) {
+        cell.textLabel.text = [NSString stringWithFormat:@"右侧按钮上移：%.0f px", ACERightButtonsOffset()];
+        cell.selectionStyle = UITableViewCellSelectionStyleNone;
+        UIStepper *stepper = [UIStepper new];
+        stepper.minimumValue = -100; stepper.maximumValue = 100; stepper.stepValue = 1;
+        stepper.value = ACERightButtonsOffset();
+        [stepper addTarget:self action:@selector(offsetChanged:) forControlEvents:UIControlEventValueChanged];
+        cell.accessoryView = stepper;
+        return cell;
+    }
     cell.textLabel.text = titles[path.row]; cell.selectionStyle = UITableViewCellSelectionStyleNone;
     UISwitch *toggle = [UISwitch new]; toggle.tag = path.row; toggle.on = ACEEnabled(keys[path.row]);
     [toggle addTarget:self action:@selector(changed:) forControlEvents:UIControlEventValueChanged]; cell.accessoryView = toggle; return cell;
@@ -202,6 +238,11 @@ static void ACEWaitForNativeLiveSources(id owner, NSUInteger attempt) {
 - (void)changed:(UISwitch *)sender {
     NSArray *keys = @[kACEVideoDefaultKey, kACEUnlimitedDurationKey, kACELivePhotoDefaultKey, kACEPhotoSaveKey];
     if (sender.tag >= 0 && sender.tag < (NSInteger)keys.count) [NSUserDefaults.standardUserDefaults setBool:sender.isOn forKey:keys[sender.tag]];
+}
+- (void)offsetChanged:(UIStepper *)sender {
+    [NSUserDefaults.standardUserDefaults setDouble:sender.value forKey:kACERightButtonsOffsetKey];
+    ACERefreshRightButtonsOffset();
+    [self.tableView reloadRowsAtIndexPaths:@[[NSIndexPath indexPathForRow:4 inSection:0]] withRowAnimation:UITableViewRowAnimationNone];
 }
 @end
 
@@ -265,6 +306,18 @@ static void ACEInstallSettingsEntry(UIViewController *controller) {
     double original = %orig;
     if (!ACEEnabled(kACEUnlimitedDurationKey)) return original;
     return MAX(original, kACEMaxRecordDuration);
+}
+%end
+
+%hook AWEPlayInteractionRightElementContainer
+- (UIView *)containerView {
+    UIView *view = %orig;
+    ACEApplyRightButtonsOffset(view);
+    return view;
+}
+- (void)setLayout:(id)layout {
+    %orig;
+    dispatch_async(dispatch_get_main_queue(), ^{ ACEApplyRightButtonsOffset([self containerView]); });
 }
 %end
 

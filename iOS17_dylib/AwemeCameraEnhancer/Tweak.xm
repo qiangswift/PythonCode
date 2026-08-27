@@ -9,6 +9,10 @@
 @interface ACCSystemLivePhotoFlowComponent : NSObject
 - (void)takeLivePhotoPicture;
 @end
+@interface ACCRealLivePhotoServiceImpl : NSObject
+- (void)changeLivePhotoToMode:(unsigned long long)mode;
+- (void)updateLivePhotoBarItem;
+@end
 
 static const NSTimeInterval kACEMaxRecordDuration = 86400.0;
 static NSString *const kACELogName = @"AwemeCameraEnhancer.log";
@@ -19,6 +23,7 @@ static NSString *const kACEPhotoSaveKey = @"ACEPhotoAutoSaveEnabled";
 static __weak UIViewController *gACECameraController;
 static NSUInteger gACECameraEntryCount = 0;
 static NSTimeInterval gACEProtectCameraUntil = 0;
+static __weak ACCRealLivePhotoServiceImpl *gACELivePhotoService;
 
 static BOOL ACEEnabled(NSString *key) {
     NSUserDefaults *defaults = NSUserDefaults.standardUserDefaults;
@@ -62,6 +67,12 @@ static void ACETraceCameraEntry(NSString *source) {
             UIViewController *top = ACETopController();
             ACELog(@"ENTRY #%lu after=%.2f top=%@ presented=%d", (unsigned long)entry, delay.doubleValue,
                    NSStringFromClass(top.class), top.presentingViewController != nil);
+            if (ACEEnabled(kACELivePhotoDefaultKey) && gACELivePhotoService &&
+                ([NSStringFromClass(top.class) isEqualToString:@"AWERecorderViewController"])) {
+                [gACELivePhotoService changeLivePhotoToMode:1];
+                [gACELivePhotoService updateLivePhotoBarItem];
+                ACELog(@"LIVE native mode and bar refreshed after=%.2f", delay.doubleValue);
+            }
         });
     }
 }
@@ -235,6 +246,12 @@ static void ACEInstallSettingsEntry(UIViewController *controller) {
 %end
 
 %hook ACCRealLivePhotoServiceImpl
+- (id)init {
+    id result = %orig;
+    gACELivePhotoService = result;
+    ACELog(@"LIVE service initialized class=%@", NSStringFromClass([result class]));
+    return result;
+}
 - (void)changeLivePhotoToMode:(unsigned long long)mode {
     if (ACEEnabled(kACELivePhotoDefaultKey)) mode = 1;
     ACELog(@"LIVE selected mode=%llu", mode);
@@ -330,7 +347,6 @@ static BOOL ACEShouldProtectRecorderDismiss(UIViewController *controller) {
 - (void)dismissViewControllerAnimated:(BOOL)animated completion:(id)completion {
     if (ACEShouldProtectRecorderDismiss((UIViewController *)self)) {
         ACELog(@"ENTRY blocked recorder self-dismiss stack=%@", NSThread.callStackSymbols);
-        gACEProtectCameraUntil = 0;
         return;
     }
     %orig;
@@ -341,11 +357,10 @@ static BOOL ACEShouldProtectRecorderDismiss(UIViewController *controller) {
 - (void)dismissViewControllerAnimated:(BOOL)animated completion:(id)completion {
     if (ACEShouldProtectRecorderDismiss((UIViewController *)self)) {
         ACELog(@"ENTRY blocked feed dismiss stack=%@", NSThread.callStackSymbols);
-        gACEProtectCameraUntil = 0;
         return;
     }
     %orig;
 }
 %end
 
-%ctor { @autoreleasepool { if ([NSBundle.mainBundle.bundleIdentifier isEqualToString:@"com.ss.iphone.ugc.Aweme"]) ACELog(@"START version=1.2.2 targeted diagnostics"); } }
+%ctor { @autoreleasepool { if ([NSBundle.mainBundle.bundleIdentifier isEqualToString:@"com.ss.iphone.ugc.Aweme"]) ACELog(@"START version=1.2.3 targeted diagnostics"); } }

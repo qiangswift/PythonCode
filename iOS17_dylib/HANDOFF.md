@@ -103,6 +103,14 @@ PhoenixVideoAdSkip 1.1.1 正在修正“商城”Tab 实际路由到福利页导
 - v2.1-48 逐项记录 `STUIStatusBar._items`、`_displayItemStates` 和 `_regions`，监听 `STUIStatusBarStringView` 文本变化，并记录 `STUIStatusBarImageView` 的图像、frame 和父视图链。
 - 新私有仓库提交：`664805fd`；GitHub Actions run：`33062112668`，rootfull、rootless、roothide 均成功。
 - rootless 测试包：`C:\Users\liqiang\Downloads\com.82flex.singlevpn_2.1-48_iphoneos-arm64.deb`。
+
+## SingleVPN v2.1-49 navigation 偏移候选
+
+- v2.1-48 日志已确认真实目标是 `STUIStatusBarNavigationItem` 位于 `bottomLeading` 区域的 `STUIStatusBarStringView`，示例文字为 `◀︎ 微信🔒` 和 `◀︎ Telegram`。
+- v2.1-49 在该字符串视图的 `setText:` 与 `layoutSubviews` 中识别 `◀`，仅对该视图应用设置的 Y 偏移；时间、NiceBarX 流量、网络和电池视图不受影响。
+- 已停用 v2.1-48 高频 STUI 全量诊断，只保留版本载入及目标偏移命中日志。
+- 新私有仓库最终提交：`01075f25`；成功 Actions run：`33062871943`（前一次 run `33062682162` 因残留未初始化诊断组而失败，未生成包）。
+- rootless 测试包：`C:\Users\liqiang\Downloads\com.82flex.singlevpn_2.1-49_iphoneos-arm64.deb`。
 - 各项目的 `packages`、`.theos`、deb、IPA、日志和其他构建缓存
 
 处理这些内容前先确认用途，避免污染 Git 历史或公开敏感分析材料。

@@ -54,6 +54,9 @@
 - (void)svpnApply5GAdvancedAttributesIfNeeded;
 @end
 
+@interface STUIStatusBarImageView : UIImageView
+@end
+
 @interface STUIStatusBarCellularNetworkTypeView : UIView
 @property (nonatomic, strong) STUIStatusBarStringView *stringView;
 @property (nonatomic, strong) NSLayoutConstraint *widthConstraint;
@@ -159,6 +162,53 @@ static NSString *svpnShortDescription(id object) {
     return description.length > 500 ? [[description substringToIndex:500] stringByAppendingString:@"..."] : description;
 }
 
+static NSString *svpnSingleLineDescription(id object, NSUInteger limit) {
+    if (!object) return @"";
+    NSString *description = nil;
+    @try { description = [object description]; } @catch (__unused NSException *exception) { return @"<description-exception>"; }
+    description = [[description stringByReplacingOccurrencesOfString:@"\n" withString:@" "]
+        stringByReplacingOccurrencesOfString:@"\r" withString:@" "];
+    return description.length > limit ? [[description substringToIndex:limit] stringByAppendingString:@"..."] : description;
+}
+
+static void svpnLogStatusBarCollections(id statusBar) {
+    if (!statusBar) return;
+    NSDictionary *items = nil;
+    NSDictionary *states = nil;
+    NSDictionary *regions = nil;
+    @try {
+        items = [statusBar valueForKey:@"_items"];
+        states = [statusBar valueForKey:@"_displayItemStates"];
+        regions = [statusBar valueForKey:@"_regions"];
+    } @catch (__unused NSException *exception) {}
+
+    svpnBreadcrumbLog(@"status collections bar=%p items=%lu states=%lu regions=%lu",
+        statusBar, (unsigned long)items.count, (unsigned long)states.count, (unsigned long)regions.count);
+    [items enumerateKeysAndObjectsUsingBlock:^(id key, id value, BOOL *stop) {
+        svpnBreadcrumbLog(@"status item keyClass=%@ key=%@ valueClass=%@ value=%@",
+            NSStringFromClass([key class]), svpnSingleLineDescription(key, 1200),
+            NSStringFromClass([value class]), svpnSingleLineDescription(value, 2000));
+    }];
+    [states enumerateKeysAndObjectsUsingBlock:^(id key, id value, BOOL *stop) {
+        svpnBreadcrumbLog(@"status state key=%@ valueClass=%@ value=%@",
+            svpnSingleLineDescription(key, 800), NSStringFromClass([value class]),
+            svpnSingleLineDescription(value, 1600));
+    }];
+    [regions enumerateKeysAndObjectsUsingBlock:^(id key, id value, BOOL *stop) {
+        svpnBreadcrumbLog(@"status region key=%@ valueClass=%@ value=%@",
+            svpnSingleLineDescription(key, 500), NSStringFromClass([value class]),
+            svpnSingleLineDescription(value, 1200));
+    }];
+}
+
+static NSString *svpnSuperviewChain(UIView *view) {
+    NSMutableArray<NSString *> *parts = [NSMutableArray array];
+    for (UIView *current = view; current && parts.count < 12; current = current.superview) {
+        [parts addObject:[NSString stringWithFormat:@"%@:%@", NSStringFromClass(current.class), NSStringFromCGRect(current.frame)]];
+    }
+    return [parts componentsJoinedByString:@" <- "];
+}
+
 static void svpnLogObjectIvars(id object) {
     if (!object) return;
     for (Class cls = object_getClass(object); cls && cls != UIView.class; cls = class_getSuperclass(cls)) {
@@ -191,6 +241,7 @@ static void svpnLogTopStatusViews(UIView *view, UIWindow *window, NSUInteger dep
             svpnBreadcrumbLog(@"view depth=%lu class=%@ frame=%@ text=%@ identifier=%@", (unsigned long)depth, className, NSStringFromCGRect(frame), text ?: @"", identifier ?: @"");
             if ([className hasPrefix:@"STUIStatusBar"] || [className containsString:@"Navigation"] || [className containsString:@"Breadcrumb"]) {
                 svpnLogObjectIvars(view);
+                if ([className isEqualToString:@"STUIStatusBar"]) svpnLogStatusBarCollections(view);
             }
         }
     }
@@ -756,6 +807,16 @@ static void ReloadPrefs() {
 
     %orig;
 
+    if ([NSBundle.mainBundle.bundleIdentifier isEqualToString:@"com.apple.springboard"]) {
+        NSString *previous = objc_getAssociatedObject(self, @selector(setText:));
+        NSString *current = self.text ?: text ?: @"";
+        if (![previous isEqualToString:current]) {
+            objc_setAssociatedObject(self, @selector(setText:), current, OBJC_ASSOCIATION_COPY_NONATOMIC);
+            svpnBreadcrumbLog(@"status string changed view=%p text=%@ frame=%@ window=%@ chain=%@",
+                self, current, NSStringFromCGRect(self.frame), NSStringFromClass(self.window.class), svpnSuperviewChain(self));
+        }
+    }
+
     BOOL decision = _isEnabledReversed ? !_isVPNEnabled : _isVPNEnabled;
     if (decision && IsNetworkTypeText(text)) {
         [self setTextColor:svpnColorWithTextColor(self.textColor)];
@@ -819,6 +880,51 @@ static void svpnDumpSpringBoardStatusRuntimeOnce(void);
 %end
 
 %end // SingleVPN_BreadcrumbDiagnostic
+
+%group SingleVPN_STUIBreadcrumbDiagnostic
+
+%hook STUIStatusBarImageView
+
+- (void)didMoveToWindow {
+    %orig;
+    if (self.window) {
+        svpnBreadcrumbLog(@"status image attached view=%p frame=%@ image=%@ window=%@ chain=%@",
+            self, NSStringFromCGRect(self.frame), svpnSingleLineDescription(self.image, 1200),
+            NSStringFromClass(self.window.class), svpnSuperviewChain(self));
+    }
+}
+
+- (void)layoutSubviews {
+    %orig;
+    NSString *signature = [NSString stringWithFormat:@"%@|%@|%@", NSStringFromCGRect(self.frame),
+        NSStringFromClass(self.window.class), svpnSingleLineDescription(self.image, 500)];
+    NSString *previous = objc_getAssociatedObject(self, @selector(layoutSubviews));
+    if (self.window && ![previous isEqualToString:signature]) {
+        objc_setAssociatedObject(self, @selector(layoutSubviews), signature, OBJC_ASSOCIATION_COPY_NONATOMIC);
+        svpnBreadcrumbLog(@"status image layout view=%p frame=%@ image=%@ window=%@ chain=%@",
+            self, NSStringFromCGRect(self.frame), svpnSingleLineDescription(self.image, 1200),
+            NSStringFromClass(self.window.class), svpnSuperviewChain(self));
+    }
+}
+
+%end
+
+%hook STUIStatusBar
+
+- (void)layoutSubviews {
+    %orig;
+    NSNumber *logged = objc_getAssociatedObject(self, @selector(layoutSubviews));
+    if (!logged.boolValue) {
+        objc_setAssociatedObject(self, @selector(layoutSubviews), @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        svpnBreadcrumbLog(@"status bar first layout view=%p frame=%@ window=%@", self,
+            NSStringFromCGRect(self.frame), NSStringFromClass(self.window.class));
+        svpnLogStatusBarCollections(self);
+    }
+}
+
+%end
+
+%end // SingleVPN_STUIBreadcrumbDiagnostic
 
 %group SingleVPN_AppBreadcrumbDiagnostic
 
@@ -986,7 +1092,8 @@ static void svpnInstallBreadcrumbDiagnostic(NSUInteger attempt) {
         return;
     }
 
-    svpnBreadcrumbLog(@"loaded version=2.1-47 bundle=%@ enabled=%d offset=%.2f", bundleIdentifier, _isEnabled, _breadcrumbVerticalOffset);
+    svpnBreadcrumbLog(@"loaded version=2.1-48 bundle=%@ enabled=%d offset=%.2f", bundleIdentifier, _isEnabled, _breadcrumbVerticalOffset);
+    %init(SingleVPN_STUIBreadcrumbDiagnostic);
     svpnInstallAppBreadcrumbDiagnostic(0);
     svpnInstallBreadcrumbDiagnostic(0);
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{

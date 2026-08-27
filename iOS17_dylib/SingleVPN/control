@@ -1,6 +1,6 @@
 Package: com.82flex.singlevpn
 Name: Single VPN
-Version: 2.1-47
+Version: 2.1-48
 Architecture: iphoneos-arm
 Description: Combine VPN state and wireless state into one icon.
 Maintainer: 82Flex <82flex@gmail.com>

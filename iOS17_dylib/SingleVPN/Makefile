@@ -1,4 +1,4 @@
-export PACKAGE_VERSION := 2.1-55
+export PACKAGE_VERSION := 2.1-56
 export THEOS_PLATFORM_DEB_COMPRESSION_TYPE := gzip
 
 ifeq ($(THEOS_DEVICE_SIMULATOR),1)
@@ -25,7 +25,7 @@ SingleVPN_FILES += SingleVPN.x
 SingleVPN_FILES += UIColor+.m
 
 SingleVPN_CFLAGS += -fobjc-arc
-SingleVPN_FRAMEWORKS += UIKit CoreGraphics
+SingleVPN_FRAMEWORKS += UIKit CoreGraphics QuartzCore
 
 include $(THEOS_MAKE_PATH)/tweak.mk
 

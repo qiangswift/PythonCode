@@ -561,6 +561,16 @@ static void svpnInstallIndependentSettingsTrafficLabel(void) {
     rightLabel.frame = CGRectMake(x, 0.0, rightPrefixWidth, trafficView.bounds.size.height);
     x += rightPrefixWidth + valueGap;
     rightValueLabel.frame = CGRectMake(x, 0.0, rightValueWidth, trafficView.bounds.size.height);
+    x += rightValueWidth;
+
+    CGFloat wifiCenterX = window.bounds.size.width * 0.805;
+    CGFloat anchoredOriginX = wifiCenterX - CGRectGetMinX(titleFrame) - x;
+    CGFloat minimumOriginX = titleLabel.bounds.size.width + trafficLeadingSpacing;
+    CGRect anchoredFrame = trafficView.frame;
+    anchoredFrame.origin.x = MAX(minimumOriginX, anchoredOriginX);
+    anchoredFrame.size.width = MAX(x,
+        window.bounds.size.width - CGRectGetMinX(titleFrame) - anchoredFrame.origin.x - 16.0);
+    trafficView.frame = anchoredFrame;
 }
 
 static void svpnStartSettingsOverlayTimer(void) {
@@ -1106,7 +1116,7 @@ static void svpnInstallBreadcrumbDiagnostic(NSUInteger attempt) {
         return;
     }
 
-    svpnBreadcrumbLog(@"loaded version=2.1-55 bundle=%@ enabled=%d offset=%.2f", bundleIdentifier, _isEnabled, _breadcrumbVerticalOffset);
+    svpnBreadcrumbLog(@"loaded version=2.1-56 bundle=%@ enabled=%d offset=%.2f", bundleIdentifier, _isEnabled, _breadcrumbVerticalOffset);
 
     svpnStartTrafficTimer();
     CFNotificationCenterAddObserver(

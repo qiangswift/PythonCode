@@ -25,6 +25,7 @@ static __weak ACCVideoEditFlowControlComponent *gACEEditFlowControl;
 static BOOL gACEAwaitingNativeReturn = NO;
 static BOOL gACELiveSaveFinished = NO;
 static BOOL gACELiveSaveSucceeded = NO;
+static BOOL gACELiveSaveInProgress = NO;
 
 static BOOL ACEEnabled(NSString *key) {
     NSUserDefaults *defaults = NSUserDefaults.standardUserDefaults;
@@ -99,6 +100,7 @@ static void ACETryNativeReturn(void) {
         gACEAwaitingNativeReturn = NO;
         BOOL saved = gACELiveSaveSucceeded;
         BOOL handled = [flow backToShootNeedAlert:NO];
+        gACELiveSaveInProgress = NO;
         ACELog(@"LIVE native back-to-shoot handled=%d saved=%d", handled, saved);
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.8 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
             ACEShowToast(gACECameraController ?: ACETopController(), saved ? @"照片已保存到相册" : @"动态照片保存失败");
@@ -168,23 +170,36 @@ static void ACEGenerateAndSaveLivePair(NSURL *sourceImage, NSURL *sourceVideo) {
     ((void (*)(id, SEL, NSURL *, NSURL *, NSURL *, id))objc_msgSend)(manager, selector, sourceImage, sourceVideo, directory, completion);
 }
 
-static void ACEWaitForNativeLiveSources(id flow, NSUInteger attempt) {
-    id repository = ACEValue(flow, @"repository");
+static id ACERepositoryFromOwner(id owner) {
+    id repository = ACEValue(owner, @"repository");
+    if (repository) return repository;
+    id publishModel = ACEValue(owner, @"publishModel") ?: ACEValue(owner, @"viewModel");
+    return ACEValue(publishModel, @"repository") ?: publishModel;
+}
+
+static void ACEWaitForNativeLiveSources(id owner, NSUInteger attempt) {
+    id repository = ACERepositoryFromOwner(owner);
     id info = ACEValue(repository, @"repoLivePhotoInfoInstance");
     NSURL *imageURL = ACEFileURL(info, @[@"livePhotoImageSourceUrl"]);
     NSURL *videoURL = ACEFileURL(info, @[@"livePhotoVideoSourceUrl"]);
     if (imageURL && videoURL) {
-        ACELog(@"LIVE_PHOTO native sources ready attempt=%lu", (unsigned long)attempt);
+        if (gACELiveSaveInProgress) return;
+        gACELiveSaveInProgress = YES;
+        gACEAwaitingNativeReturn = YES;
+        gACELiveSaveFinished = NO;
+        gACELiveSaveSucceeded = NO;
+        ACELog(@"LIVE_PHOTO native sources ready attempt=%lu owner=%@ repository=%@ info=%@",
+               (unsigned long)attempt, NSStringFromClass([owner class]), NSStringFromClass([repository class]), NSStringFromClass([info class]));
         ACEGenerateAndSaveLivePair(imageURL, videoURL);
         return;
     }
     if (attempt >= 30) {
-        ACELog(@"LIVE_PHOTO native source timeout info=%@ image=%@ video=%@", info, imageURL, videoURL);
-        ACEFinishLiveSave(NO, [NSError errorWithDomain:@"AwemeCameraEnhancer" code:3 userInfo:nil]);
+        ACELog(@"LIVE_PHOTO editor source timeout owner=%@ repository=%@ info=%@ image=%@ video=%@",
+               NSStringFromClass([owner class]), NSStringFromClass([repository class]), NSStringFromClass([info class]), imageURL, videoURL);
         return;
     }
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.2 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        ACEWaitForNativeLiveSources(flow, attempt + 1);
+        ACEWaitForNativeLiveSources(owner, attempt + 1);
     });
 }
 
@@ -316,11 +331,6 @@ static void ACEInstallSettingsEntry(UIViewController *controller) {
 }
 - (void)flowServiceDidSystemLivePhotoWithPicture:(id)picture {
     ACELog(@"LIVE captured class=%@ value=%@", NSStringFromClass([picture class]), picture); %orig;
-    if (!ACEEnabled(kACEPhotoSaveKey)) return;
-    gACEAwaitingNativeReturn = YES;
-    gACELiveSaveFinished = NO;
-    gACELiveSaveSucceeded = NO;
-    ACEWaitForNativeLiveSources(self, 0);
 }
 %end
 
@@ -329,6 +339,11 @@ static void ACEInstallSettingsEntry(UIViewController *controller) {
     %orig;
     gACEEditFlowControl = self;
     ACELog(@"LIVE edit flow appeared awaiting=%d saveFinished=%d", gACEAwaitingNativeReturn, gACELiveSaveFinished);
+    if (ACEEnabled(kACEPhotoSaveKey) && ACEEnabled(kACELivePhotoDefaultKey) && !gACELiveSaveInProgress) {
+        ACELog(@"LIVE_PHOTO probing editor publishModel=%@ repository=%@",
+               NSStringFromClass([ACEValue(self, @"publishModel") class]), NSStringFromClass([ACERepositoryFromOwner(self) class]));
+        ACEWaitForNativeLiveSources(self, 0);
+    }
     ACETryNativeReturn();
 }
 %end
@@ -365,4 +380,4 @@ static void ACEInstallSettingsEntry(UIViewController *controller) {
 %end
 
 
-%ctor { @autoreleasepool { if ([NSBundle.mainBundle.bundleIdentifier isEqualToString:@"com.ss.iphone.ugc.Aweme"]) ACELog(@"START version=1.2.6 native Live Photo pipeline"); } }
+%ctor { @autoreleasepool { if ([NSBundle.mainBundle.bundleIdentifier isEqualToString:@"com.ss.iphone.ugc.Aweme"]) ACELog(@"START version=1.2.7 editor Live Photo pipeline"); } }

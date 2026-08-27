@@ -18,7 +18,6 @@ static NSString *const kACEUnlimitedDurationKey = @"ACEUnlimitedDurationEnabled"
 static NSString *const kACELivePhotoDefaultKey = @"ACELivePhotoDefaultEnabled";
 static NSString *const kACEPhotoSaveKey = @"ACEPhotoAutoSaveEnabled";
 static __weak UIViewController *gACECameraController;
-static NSUInteger gACECameraEntryCount = 0;
 static __weak ACCRecordSystemLivePhotoServiceImpl *gACESystemLivePhotoService;
 static __weak ACCVideoEditFlowControlComponent *gACEEditFlowControl;
 static BOOL gACEAwaitingNativeReturn = NO;
@@ -51,15 +50,7 @@ static UIViewController *ACETopController(void) {
 }
 
 static void ACETraceCameraEntry(NSString *source) {
-    NSUInteger entry = ++gACECameraEntryCount;
-    ACELog(@"ENTRY #%lu source=%@ top-now=%@", (unsigned long)entry, source, NSStringFromClass(ACETopController().class));
-    for (NSNumber *delay in @[@0.25, @0.75, @1.5, @3.0]) {
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(delay.doubleValue * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-            UIViewController *top = ACETopController();
-            ACELog(@"ENTRY #%lu after=%.2f top=%@ presented=%d", (unsigned long)entry, delay.doubleValue,
-                   NSStringFromClass(top.class), top.presentingViewController != nil);
-        });
-    }
+    (void)source;
 }
 
 static void ACEShowToast(UIViewController *controller, NSString *text) {
@@ -89,9 +80,8 @@ static void ACETryNativeReturn(void) {
         ACCVideoEditFlowControlComponent *flow = gACEEditFlowControl;
         gACEAwaitingNativeReturn = NO;
         BOOL saved = gACELiveSaveSucceeded;
-        BOOL handled = [flow backToShootNeedAlert:NO];
+        [flow backToShootNeedAlert:NO];
         gACELiveSaveInProgress = NO;
-        ACELog(@"LIVE native back-to-shoot handled=%d saved=%d", handled, saved);
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.8 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
             ACEShowToast(gACECameraController ?: ACETopController(), saved ? @"照片已保存到相册" : @"动态照片保存失败");
         });

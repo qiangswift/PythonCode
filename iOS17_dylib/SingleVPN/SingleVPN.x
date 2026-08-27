@@ -204,14 +204,6 @@ static void svpnLogStatusBarCollections(id statusBar) {
     }];
 }
 
-static NSString *svpnSuperviewChain(UIView *view) {
-    NSMutableArray<NSString *> *parts = [NSMutableArray array];
-    for (UIView *current = view; current && parts.count < 12; current = current.superview) {
-        [parts addObject:[NSString stringWithFormat:@"%@:%@", NSStringFromClass(current.class), NSStringFromCGRect(current.frame)]];
-    }
-    return [parts componentsJoinedByString:@" <- "];
-}
-
 static BOOL svpnIsStatusBarNavigationView(STUIStatusBarStringView *view, CGRect proposedFrame) {
     NSString *text = view.text ?: @"";
     if ([text rangeOfString:@"◀"].location != NSNotFound) return YES;

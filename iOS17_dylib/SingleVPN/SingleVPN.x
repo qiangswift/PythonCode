@@ -1,12 +1,9 @@
-#import <HBLog.h>
 #import <UIKit/UIKit.h>
 #import <dlfcn.h>
 #import <ifaddrs.h>
 #import <net/if.h>
 #import <net/if_dl.h>
 #import <objc/runtime.h>
-#import <notify.h>
-#import <stdlib.h>
 
 #import "Common.h"
 #import "UIColor+.h"
@@ -70,17 +67,6 @@
 @interface PSUIPrefsRootController : UITableViewController
 @end
 
-@interface SBDeviceApplicationSceneStatusBarBreadcrumbProvider : NSObject
-- (id)breadcrumbActionsForActivatingSceneEntity:(id)entity withTransitionContext:(id)context;
-@end
-
-@interface UIStatusBarSystemNavigationItemView : UIView
-@property (nonatomic, strong) UIButton *button;
-@end
-
-@interface UIStatusBarBreadcrumbItemView : UIStatusBarSystemNavigationItemView
-@end
-
 static BOOL _isEnabled = NO;
 static BOOL _isVPNEnabled = NO;
 static BOOL _isEnabledReversed = NO;
@@ -92,117 +78,13 @@ static UIColor *_lightReplacementColor = nil;
 static dispatch_source_t _trafficTimer = nil;
 static dispatch_source_t _settingsOverlayTimer = nil;
 static BOOL _settingsRootVisible = NO;
-static NSHashTable<UIView *> *_breadcrumbViews = nil;
 static const void *SVPNNavigationShiftedFrameKey = &SVPNNavigationShiftedFrameKey;
-
-static void svpnApplyBreadcrumbOffset(UIView *view);
 
 static NSString *const SVPNTrafficBaselinesKey = @"TrafficBaselines";
 static NSString *const SVPNCellularDownloadKey = @"TrafficCellularDownload";
 static NSString *const SVPNCellularUploadKey = @"TrafficCellularUpload";
 static NSString *const SVPNWifiDownloadKey = @"TrafficWifiDownload";
 static NSString *const SVPNWifiUploadKey = @"TrafficWifiUpload";
-static const char *SVPNBreadcrumbStateName = "com.82flex.singlevpnprefs.breadcrumb-state";
-static const uint64_t SVPNBreadcrumbStateMagic = 0x5356ULL;
-static int _breadcrumbStateToken = -1;
-
-static BOOL svpnIsPreferenceAuthorityProcess(void) {
-    NSString *bundleIdentifier = NSBundle.mainBundle.bundleIdentifier;
-    return [bundleIdentifier isEqualToString:@"com.apple.springboard"] || [bundleIdentifier isEqualToString:@"com.apple.Preferences"];
-}
-
-static void svpnPublishBreadcrumbState(void) {
-    if (_breadcrumbStateToken < 0 && notify_register_check(SVPNBreadcrumbStateName, &_breadcrumbStateToken) != NOTIFY_STATUS_OK) return;
-    int32_t milliOffset = (int32_t)llround(_breadcrumbVerticalOffset * 1000.0);
-    uint64_t state = (SVPNBreadcrumbStateMagic << 48) | ((uint64_t)(_isEnabled ? 1 : 0) << 47) | (uint32_t)milliOffset;
-    notify_set_state(_breadcrumbStateToken, state);
-    notify_post("com.82flex.singlevpnprefs/breadcrumb-state-updated");
-}
-
-static BOOL svpnConsumeBreadcrumbState(void) {
-    if (_breadcrumbStateToken < 0 && notify_register_check(SVPNBreadcrumbStateName, &_breadcrumbStateToken) != NOTIFY_STATUS_OK) return NO;
-    uint64_t state = 0;
-    if (notify_get_state(_breadcrumbStateToken, &state) != NOTIFY_STATUS_OK || (state >> 48) != SVPNBreadcrumbStateMagic) return NO;
-    _isEnabled = ((state >> 47) & 1) != 0;
-    _breadcrumbVerticalOffset = (CGFloat)(int32_t)(uint32_t)state / 1000.0;
-    return YES;
-}
-static NSString *svpnBreadcrumbLogPath(void) {
-    NSString *bundleIdentifier = NSBundle.mainBundle.bundleIdentifier;
-    if ([bundleIdentifier isEqualToString:@"com.apple.springboard"]) {
-        return @"/var/mobile/Library/Preferences/com.82flex.singlevpn.breadcrumb.log";
-    }
-    NSString *documents = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES).firstObject;
-    return documents.length ? [documents stringByAppendingPathComponent:@"SingleVPNBreadcrumb.log"] : nil;
-}
-
-static void svpnBreadcrumbLog(NSString *format, ...) {
-    va_list args; va_start(args, format);
-    NSString *message = [[NSString alloc] initWithFormat:format arguments:args];
-    va_end(args);
-    NSString *line = [NSString stringWithFormat:@"%@ %@\n", NSDate.date, message ?: @""];
-    NSString *logPath = svpnBreadcrumbLogPath();
-    if (!logPath.length) return;
-    @synchronized (NSFileManager.defaultManager) {
-        if (![NSFileManager.defaultManager fileExistsAtPath:logPath]) {
-            NSError *error = nil;
-            [line writeToFile:logPath atomically:YES encoding:NSUTF8StringEncoding error:&error];
-            if (error) NSLog(@"[SingleVPN] breadcrumb log create failed: %@", error);
-        } else {
-            NSFileHandle *handle = [NSFileHandle fileHandleForWritingAtPath:logPath];
-            [handle seekToEndOfFile];
-            [handle writeData:[line dataUsingEncoding:NSUTF8StringEncoding]];
-            [handle closeFile];
-        }
-    }
-}
-
-static NSString *svpnShortDescription(id object) {
-    if (!object) return @"";
-    NSString *description = nil;
-    @try { description = [object description]; } @catch (__unused NSException *exception) { return @"<description-exception>"; }
-    description = [description stringByReplacingOccurrencesOfString:@"\n" withString:@" "];
-    return description.length > 500 ? [[description substringToIndex:500] stringByAppendingString:@"..."] : description;
-}
-
-static NSString *svpnSingleLineDescription(id object, NSUInteger limit) {
-    if (!object) return @"";
-    NSString *description = nil;
-    @try { description = [object description]; } @catch (__unused NSException *exception) { return @"<description-exception>"; }
-    description = [[description stringByReplacingOccurrencesOfString:@"\n" withString:@" "]
-        stringByReplacingOccurrencesOfString:@"\r" withString:@" "];
-    return description.length > limit ? [[description substringToIndex:limit] stringByAppendingString:@"..."] : description;
-}
-
-static void svpnLogStatusBarCollections(id statusBar) {
-    if (!statusBar) return;
-    NSDictionary *items = nil;
-    NSDictionary *states = nil;
-    NSDictionary *regions = nil;
-    @try {
-        items = [statusBar valueForKey:@"_items"];
-        states = [statusBar valueForKey:@"_displayItemStates"];
-        regions = [statusBar valueForKey:@"_regions"];
-    } @catch (__unused NSException *exception) {}
-
-    svpnBreadcrumbLog(@"status collections bar=%p items=%lu states=%lu regions=%lu",
-        statusBar, (unsigned long)items.count, (unsigned long)states.count, (unsigned long)regions.count);
-    [items enumerateKeysAndObjectsUsingBlock:^(id key, id value, BOOL *stop) {
-        svpnBreadcrumbLog(@"status item keyClass=%@ key=%@ valueClass=%@ value=%@",
-            NSStringFromClass([key class]), svpnSingleLineDescription(key, 1200),
-            NSStringFromClass([value class]), svpnSingleLineDescription(value, 2000));
-    }];
-    [states enumerateKeysAndObjectsUsingBlock:^(id key, id value, BOOL *stop) {
-        svpnBreadcrumbLog(@"status state key=%@ valueClass=%@ value=%@",
-            svpnSingleLineDescription(key, 800), NSStringFromClass([value class]),
-            svpnSingleLineDescription(value, 1600));
-    }];
-    [regions enumerateKeysAndObjectsUsingBlock:^(id key, id value, BOOL *stop) {
-        svpnBreadcrumbLog(@"status region key=%@ valueClass=%@ value=%@",
-            svpnSingleLineDescription(key, 500), NSStringFromClass([value class]),
-            svpnSingleLineDescription(value, 1200));
-    }];
-}
 
 static BOOL svpnIsStatusBarNavigationView(STUIStatusBarStringView *view, CGRect proposedFrame) {
     NSString *text = view.text ?: @"";
@@ -238,87 +120,10 @@ static void svpnApplyStatusBarNavigationOffset(STUIStatusBarStringView *view) {
     bounds.origin.y = 0.0;
     view.bounds = bounds;
     view.layer.transform = CATransform3DMakeTranslation(0.0, offset, 0.0);
-    NSNumber *lastOffset = objc_getAssociatedObject(view, @selector(svpnApply5GAdvancedAttributesIfNeeded));
-    if (!lastOffset || fabs(lastOffset.doubleValue - offset) > 0.01) {
-        objc_setAssociatedObject(view, @selector(svpnApply5GAdvancedAttributesIfNeeded), @(offset), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-        svpnBreadcrumbLog(@"navigation layer offset applied text=%@ frame=%@ offset=%.2f enabled=%d",
-            view.text ?: @"", NSStringFromCGRect(view.frame), offset, _isEnabled);
-    }
-}
-
-static void svpnLogObjectIvars(id object) {
-    if (!object) return;
-    for (Class cls = object_getClass(object); cls && cls != UIView.class; cls = class_getSuperclass(cls)) {
-        unsigned int count = 0;
-        Ivar *ivars = class_copyIvarList(cls, &count);
-        for (unsigned int index = 0; index < count; index++) {
-            Ivar ivar = ivars[index];
-            const char *type = ivar_getTypeEncoding(ivar);
-            if (!type || type[0] != '@') continue;
-            id value = nil;
-            @try { value = object_getIvar(object, ivar); } @catch (__unused NSException *exception) { value = nil; }
-            if (value) {
-                svpnBreadcrumbLog(@"live ivar owner=%@ name=%s valueClass=%@ value=%@", NSStringFromClass([object class]), ivar_getName(ivar), NSStringFromClass([value class]), svpnShortDescription(value));
-            }
-        }
-        free(ivars);
-    }
-}
-
-static void svpnLogTopStatusViews(UIView *view, UIWindow *window, NSUInteger depth) {
-    if (!view || depth > 12) return;
-    CGRect frame = [view convertRect:view.bounds toView:window];
-    BOOL nearTop = CGRectGetMinY(frame) < 100.0 && CGRectGetMaxY(frame) > -20.0;
-    if (nearTop && !view.hidden && view.alpha > 0.01) {
-        NSString *className = NSStringFromClass(view.class);
-        NSString *text = [view isKindOfClass:UILabel.class] ? ((UILabel *)view).text : nil;
-        if (!text.length && [view isKindOfClass:UIButton.class]) text = ((UIButton *)view).currentTitle;
-        NSString *identifier = view.accessibilityIdentifier;
-        if ([className.lowercaseString containsString:@"status"] || [className hasPrefix:@"NBX"] || text.length || identifier.length) {
-            svpnBreadcrumbLog(@"view depth=%lu class=%@ frame=%@ text=%@ identifier=%@", (unsigned long)depth, className, NSStringFromCGRect(frame), text ?: @"", identifier ?: @"");
-            if ([className hasPrefix:@"STUIStatusBar"] || [className containsString:@"Navigation"] || [className containsString:@"Breadcrumb"]) {
-                svpnLogObjectIvars(view);
-                if ([className isEqualToString:@"STUIStatusBar"]) svpnLogStatusBarCollections(view);
-            }
-        }
-    }
-    for (UIView *subview in view.subviews) svpnLogTopStatusViews(subview, window, depth + 1);
-}
-
-static void svpnCaptureBreadcrumbViewHierarchyAfterDelay(NSTimeInterval delay, NSUInteger pass) {
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(delay * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        svpnBreadcrumbLog(@"breadcrumb view scan pass=%lu delay=%.2f", (unsigned long)pass, delay);
-        for (UIWindow *window in UIApplication.sharedApplication.windows) {
-            svpnLogTopStatusViews(window, window, 0);
-        }
-        svpnBreadcrumbLog(@"breadcrumb view scan complete pass=%lu", (unsigned long)pass);
-    });
-}
-
-static void svpnCaptureBreadcrumbViewHierarchy(void) {
-    const NSTimeInterval delays[] = { 0.2, 0.8, 1.5, 3.0, 5.0 };
-    for (NSUInteger index = 0; index < sizeof(delays) / sizeof(delays[0]); index++) {
-        svpnCaptureBreadcrumbViewHierarchyAfterDelay(delays[index], index + 1);
-    }
 }
 
 static NSUserDefaults *svpnDefaults(void) {
     return [[NSUserDefaults alloc] initWithSuiteName:@"com.82flex.singlevpnprefs"];
-}
-
-static void svpnApplyBreadcrumbOffset(UIView *view) {
-    if (!view) return;
-    CGFloat offset = _isEnabled ? _breadcrumbVerticalOffset : 0.0;
-    view.transform = CGAffineTransformMakeTranslation(0.0, offset);
-    [_breadcrumbViews addObject:view];
-}
-
-static void svpnRefreshBreadcrumbOffsets(void) {
-    dispatch_async(dispatch_get_main_queue(), ^{
-        for (UIView *view in _breadcrumbViews.allObjects) {
-            svpnApplyBreadcrumbOffset(view);
-        }
-    });
 }
 
 static void svpnSampleTrafficUsage(void) {
@@ -611,16 +416,10 @@ static void ReloadPrefs() {
     _isEnabled = settings[@"IsEnabled"] ? [settings[@"IsEnabled"] boolValue] : YES;
     _isEnabledReversed = settings[@"IsEnabledReversed"] ? [settings[@"IsEnabledReversed"] boolValue] : NO;
     _isForce5GAEnabled = settings[@"IsForce5GAEnabled"] ? [settings[@"IsForce5GAEnabled"] boolValue] : NO;
-    _breadcrumbVerticalOffset = settings[@"BreadcrumbVerticalOffset"] ? [settings[@"BreadcrumbVerticalOffset"] doubleValue] : 0.0;
+    _breadcrumbVerticalOffset = settings[@"BreadcrumbVerticalOffset"] ? [settings[@"BreadcrumbVerticalOffset"] doubleValue] : 7.6;
 
     _lightReplacementColor = svpnColorWithHexString(settings[@"ForegroundColorLight"]) ?: [UIColor colorWithRed:0.19607843137254902 green:0.7803921568627451 blue:0.34901960784313724 alpha:1];
     _darkReplacementColor = svpnColorWithHexString(settings[@"ForegroundColorDark"]) ?: [UIColor colorWithRed:0.17254901960784313 green:0.8156862745098039 blue:0.3411764705882353 alpha:1];
-    if (svpnIsPreferenceAuthorityProcess()) {
-        svpnPublishBreadcrumbState();
-    } else {
-        svpnConsumeBreadcrumbState();
-    }
-    svpnRefreshBreadcrumbOffsets();
 }
 
 %group SingleVPN_16
@@ -932,176 +731,7 @@ static void ReloadPrefs() {
 
 %end // SingleVPN_17
 
-static void svpnDumpSpringBoardStatusRuntimeOnce(void);
-
-%group SingleVPN_BreadcrumbDiagnostic
-
-%hook SBDeviceApplicationSceneStatusBarBreadcrumbProvider
-
-- (id)breadcrumbActionsForActivatingSceneEntity:(id)entity withTransitionContext:(id)context {
-    id result = %orig;
-    svpnBreadcrumbLog(@"provider actions class=%@ count=%lu entity=%@ context=%@", NSStringFromClass([result class]), (unsigned long)([result respondsToSelector:@selector(count)] ? [result count] : 0), NSStringFromClass([entity class]), NSStringFromClass([context class]));
-    svpnDumpSpringBoardStatusRuntimeOnce();
-    svpnCaptureBreadcrumbViewHierarchy();
-    return result;
-}
-
-%end
-
-%end // SingleVPN_BreadcrumbDiagnostic
-
-%group SingleVPN_AppBreadcrumbDiagnostic
-
-%hook UIStatusBarBreadcrumbItemView
-
-- (void)layoutSubviews {
-    %orig;
-    CGFloat offset = _isEnabled ? _breadcrumbVerticalOffset : 0.0;
-    UIButton *button = self.button;
-    if (button) svpnApplyBreadcrumbOffset(button);
-    NSNumber *lastOffset = objc_getAssociatedObject(self, @selector(layoutSubviews));
-    if (!lastOffset || fabs(lastOffset.doubleValue - offset) > 0.01) {
-        objc_setAssociatedObject(self, @selector(layoutSubviews), @(offset), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-        svpnBreadcrumbLog(@"breadcrumb button offset applied view=%@ buttonFrame=%@ offset=%.2f enabled=%d", NSStringFromClass(self.class), NSStringFromCGRect(button.frame), offset, _isEnabled);
-    }
-}
-
-%end
-
-%end // SingleVPN_AppBreadcrumbDiagnostic
-
-static void svpnDumpRuntimeShape(Class cls) {
-    if (!cls) return;
-    svpnBreadcrumbLog(@"shape class=%@ superclass=%@", NSStringFromClass(cls), NSStringFromClass(class_getSuperclass(cls)));
-    unsigned int methodCount = 0;
-    Method *methods = class_copyMethodList(cls, &methodCount);
-    for (unsigned int index = 0; index < methodCount; index++) {
-        svpnBreadcrumbLog(@"shape method class=%@ selector=%@ types=%s", NSStringFromClass(cls), NSStringFromSelector(method_getName(methods[index])), method_getTypeEncoding(methods[index]));
-    }
-    free(methods);
-    unsigned int ivarCount = 0;
-    Ivar *ivars = class_copyIvarList(cls, &ivarCount);
-    for (unsigned int index = 0; index < ivarCount; index++) {
-        svpnBreadcrumbLog(@"shape ivar class=%@ name=%s type=%s", NSStringFromClass(cls), ivar_getName(ivars[index]), ivar_getTypeEncoding(ivars[index]));
-    }
-    free(ivars);
-    unsigned int propertyCount = 0;
-    objc_property_t *properties = class_copyPropertyList(cls, &propertyCount);
-    for (unsigned int index = 0; index < propertyCount; index++) {
-        svpnBreadcrumbLog(@"shape property class=%@ name=%s attrs=%s", NSStringFromClass(cls), property_getName(properties[index]), property_getAttributes(properties[index]));
-    }
-    free(properties);
-}
-
-static void svpnDumpBreadcrumbSystemShape(void) {
-    static dispatch_once_t onceToken;
-    dispatch_once(&onceToken, ^{
-        NSArray<NSString *> *names = @[
-            @"UIStatusBarBreadcrumbItemView",
-            @"_UIStatusBarNavigationItem",
-            @"_UIStatusBarDisplayItemPlacement",
-            @"_UIStatusBarVisualProvider_Phone",
-            @"UIStatusBarLayoutManager",
-            @"UIStatusBarServer"
-        ];
-        for (NSString *name in names) svpnDumpRuntimeShape(NSClassFromString(name));
-        svpnBreadcrumbLog(@"shape dump complete");
-    });
-}
-
-static void svpnDumpSpringBoardNavigationClasses(void) {
-    int classCount = objc_getClassList(NULL, 0);
-    if (classCount <= 0) return;
-    Class *classes = (__unsafe_unretained Class *)calloc((size_t)classCount, sizeof(Class));
-    classCount = objc_getClassList(classes, classCount);
-    svpnBreadcrumbLog(@"springboard navigation class scan count=%d", classCount);
-    for (int index = 0; index < classCount; index++) {
-        NSString *name = NSStringFromClass(classes[index]);
-        NSString *lower = name.lowercaseString;
-        BOOL relevantName = [lower containsString:@"breadcrumb"] || [lower containsString:@"navigation"];
-        BOOL statusRelated = [lower containsString:@"statusbar"] || [name hasPrefix:@"STUI"] || [name hasPrefix:@"SB"];
-        if (relevantName && statusRelated) {
-            svpnBreadcrumbLog(@"springboard navigation candidate=%@", name);
-            svpnDumpRuntimeShape(classes[index]);
-        }
-    }
-    free(classes);
-    svpnBreadcrumbLog(@"springboard navigation class scan complete");
-}
-
-static void svpnDumpSpringBoardStatusRuntimeOnce(void) {
-    static dispatch_once_t onceToken;
-    dispatch_once(&onceToken, ^{
-        svpnBreadcrumbLog(@"event-time status runtime dump begin");
-        NSArray<NSString *> *names = @[
-            @"STUIStatusBar", @"STUIStatusBarForegroundView", @"STUIStatusBarDisplayItem",
-            @"STUIStatusBarItem", @"STUIStatusBarIdentifier", @"STUIStatusBarImageView",
-            @"STUIStatusBarStringView", @"STUIStatusBarVisualProvider_Phone",
-            @"SBDeviceApplicationSceneStatusBarBreadcrumbProvider"
-        ];
-        for (NSString *name in names) {
-            Class cls = NSClassFromString(name);
-            svpnBreadcrumbLog(@"event-time class name=%@ present=%d", name, cls != Nil);
-            if (cls) svpnDumpRuntimeShape(cls);
-        }
-        svpnDumpSpringBoardNavigationClasses();
-        svpnBreadcrumbLog(@"event-time status runtime dump complete");
-    });
-}
-
-static void svpnInstallAppBreadcrumbDiagnostic(NSUInteger attempt) {
-    Class breadcrumbClass = NSClassFromString(@"UIStatusBarBreadcrumbItemView");
-    if (breadcrumbClass) {
-        static dispatch_once_t onceToken;
-        dispatch_once(&onceToken, ^{
-            %init(SingleVPN_AppBreadcrumbDiagnostic);
-            svpnBreadcrumbLog(@"breadcrumb button hook installed class=%@ offset=%.2f enabled=%d", NSStringFromClass(breadcrumbClass), _breadcrumbVerticalOffset, _isEnabled);
-            svpnDumpBreadcrumbSystemShape();
-        });
-        return;
-    }
-    if (attempt < 40) {
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-            svpnInstallAppBreadcrumbDiagnostic(attempt + 1);
-        });
-    }
-}
-
-static void svpnInstallBreadcrumbDiagnostic(NSUInteger attempt) {
-    Class provider = NSClassFromString(@"SBDeviceApplicationSceneStatusBarBreadcrumbProvider");
-    SEL selector = @selector(breadcrumbActionsForActivatingSceneEntity:withTransitionContext:);
-    BOOL selectorPresent = provider && class_getInstanceMethod(provider, selector) != NULL;
-    svpnBreadcrumbLog(@"diagnostic probe attempt=%lu class=%d selector=%d enabled=%d offset=%.2f", (unsigned long)attempt, provider != Nil, selectorPresent, _isEnabled, _breadcrumbVerticalOffset);
-    if (provider && !selectorPresent && attempt == 0) {
-        for (Class current = provider; current; current = class_getSuperclass(current)) {
-            unsigned int count = 0;
-            Method *methods = class_copyMethodList(current, &count);
-            svpnBreadcrumbLog(@"method dump class=%@ count=%u", NSStringFromClass(current), count);
-            for (unsigned int index = 0; index < count; index++) {
-                NSString *name = NSStringFromSelector(method_getName(methods[index]));
-                NSString *lower = name.lowercaseString;
-                if ([lower containsString:@"breadcrumb"] || [lower containsString:@"scene"] || [lower containsString:@"transition"] || [lower containsString:@"activat"] || [lower containsString:@"statusbar"]) {
-                    svpnBreadcrumbLog(@"candidate class=%@ selector=%@ types=%s", NSStringFromClass(current), name, method_getTypeEncoding(methods[index]));
-                }
-            }
-            free(methods);
-        }
-    }
-    if (selectorPresent) {
-        static dispatch_once_t onceToken;
-        dispatch_once(&onceToken, ^{
-            %init(SingleVPN_BreadcrumbDiagnostic);
-            svpnBreadcrumbLog(@"diagnostic hook installed");
-        });
-        return;
-    }
-    if (attempt < 20) dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        svpnInstallBreadcrumbDiagnostic(attempt + 1);
-    });
-}
-
 %ctor {
-    _breadcrumbViews = [NSHashTable weakObjectsHashTable];
     ReloadPrefs();
 
     NSString *bundleIdentifier = NSBundle.mainBundle.bundleIdentifier;
@@ -1109,14 +739,7 @@ static void svpnInstallBreadcrumbDiagnostic(NSUInteger attempt) {
         svpnStartSettingsOverlayTimer();
         return;
     }
-    if (![bundleIdentifier isEqualToString:@"com.apple.springboard"]) {
-        svpnBreadcrumbLog(@"loaded app version=2.1-41 bundle=%@ executable=%@ offset=%.2f enabled=%d state=%d", bundleIdentifier, NSProcessInfo.processInfo.processName, _breadcrumbVerticalOffset, _isEnabled, svpnConsumeBreadcrumbState());
-        CFNotificationCenterAddObserver(CFNotificationCenterGetDarwinNotifyCenter(), NULL, (CFNotificationCallback)ReloadPrefs, CFSTR("com.82flex.singlevpnprefs/breadcrumb-state-updated"), NULL, CFNotificationSuspensionBehaviorCoalesce);
-        svpnInstallAppBreadcrumbDiagnostic(0);
-        return;
-    }
-
-    svpnBreadcrumbLog(@"loaded version=2.1-56 bundle=%@ enabled=%d offset=%.2f", bundleIdentifier, _isEnabled, _breadcrumbVerticalOffset);
+    if (![bundleIdentifier isEqualToString:@"com.apple.springboard"]) return;
 
     svpnStartTrafficTimer();
     CFNotificationCenterAddObserver(

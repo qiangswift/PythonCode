@@ -90,7 +90,7 @@
 			<key>cell</key>
 			<string>PSSliderCell</string>
 			<key>default</key>
-			<real>0</real>
+			<real>7.6</real>
 			<key>defaults</key>
 			<string>com.82flex.singlevpnprefs</string>
 			<key>key</key>
@@ -209,7 +209,7 @@
 			<key>label</key>
 			<string></string>
 			<key>footerText</key>
-			<string>Version 2.1-33 Diagnostic</string>
+			<string>Version 2.2.0</string>
 		</dict>
 	</array>
 	<key>title</key>

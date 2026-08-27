@@ -1,0 +1,6 @@
+#!/bin/sh
+
+rm -f /var/mobile/Library/Preferences/com.82flex.singlevpn.breadcrumb.log
+rm -f /var/mobile/Containers/Data/Application/*/Documents/SingleVPNBreadcrumb.log
+
+exit 0

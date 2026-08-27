@@ -152,3 +152,11 @@ PhoenixVideoAdSkip 1.1.1 正在修正“商城”Tab 实际路由到福利页导
 - v2.1-53 在识别到 `STUIStatusBarStringView` 返回项时，解除该视图到 `STUIStatusBar` 之间父链的 `clipsToBounds` 与 `masksToBounds`，使正值可以继续向下显示。
 - 私有仓库提交：`89df30c5`；GitHub Actions run `33065175626` 首次 Release 遇到 GitHub Unicorn 临时错误，attempt 2 的 rootfull、rootless、roothide 和 Release 均成功。
 - rootless 测试包：`C:\Users\liqiang\Downloads\com.82flex.singlevpn_2.1-53_iphoneos-arm64.deb`。
+
+## SingleVPN v2.1-54 数值右对齐与内部文字位移
+
+- v2.1-53 测试确认 `-10` 的 frame 上移有效，但 `+8` 仍被 StatusBar 外部布局边界抵消；仅解除父级裁剪不足以解决。
+- v2.1-54 不再移动 navigation view 的 frame，改为在 `setFrame:` 与 `layoutSubviews` 完成后设置内部 `bounds.origin.y = -offset`，正值移动文字内容向下、负值向上。
+- 流量摘要每组拆为固定前缀标签和独立右对齐数值标签，使不同位数的 `xx.xxG` 以末尾 `G` 对齐。
+- 私有仓库提交：`77f8f5e8`；GitHub Actions run `33065989085` 的 rootfull、rootless、roothide 均构建成功。
+- rootless 测试包：`C:\Users\liqiang\Downloads\com.82flex.singlevpn_2.1-54_iphoneos-arm64.deb`。

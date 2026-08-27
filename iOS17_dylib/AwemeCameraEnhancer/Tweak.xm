@@ -181,18 +181,19 @@ static BOOL ACEForceLivePhotoAutoOpen(id self, SEL _cmd) {
 
 - (void)viewDidLoad {
     %orig;
+    UIViewController *settingsController = (UIViewController *)self;
     UIBarButtonItem *entry = [[UIBarButtonItem alloc] initWithTitle:@"相机增强"
                                                               style:UIBarButtonItemStylePlain
                                                              target:self
                                                              action:@selector(ace_openCameraEnhancerSettings)];
-    NSMutableArray *items = [NSMutableArray arrayWithArray:self.navigationItem.rightBarButtonItems ?: @[]];
+    NSMutableArray *items = [NSMutableArray arrayWithArray:settingsController.navigationItem.rightBarButtonItems ?: @[]];
     BOOL exists = NO;
     for (UIBarButtonItem *item in items) {
         if ([item.title isEqualToString:@"相机增强"]) { exists = YES; break; }
     }
     if (!exists) {
         [items addObject:entry];
-        self.navigationItem.rightBarButtonItems = items;
+        settingsController.navigationItem.rightBarButtonItems = items;
     }
     ACELog(@"SETTINGS entry installed");
 }
@@ -200,7 +201,8 @@ static BOOL ACEForceLivePhotoAutoOpen(id self, SEL _cmd) {
 %new
 - (void)ace_openCameraEnhancerSettings {
     ACEPreferencesController *controller = [[ACEPreferencesController alloc] init];
-    [self.navigationController pushViewController:controller animated:YES];
+    UIViewController *settingsController = (UIViewController *)self;
+    [settingsController.navigationController pushViewController:controller animated:YES];
     ACELog(@"SETTINGS opened");
 }
 

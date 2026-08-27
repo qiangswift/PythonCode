@@ -213,8 +213,23 @@ static BOOL svpnIsStatusBarNavigationView(STUIStatusBarStringView *view, CGRect 
     return bottomLeadingGeometry && !IsNetworkTypeText(text);
 }
 
+static void svpnAllowStatusBarNavigationOverflow(UIView *view) {
+    UIView *candidate = view.superview;
+    NSUInteger depth = 0;
+    while (candidate && depth < 8) {
+        candidate.clipsToBounds = NO;
+        candidate.layer.masksToBounds = NO;
+        if ([candidate isKindOfClass:NSClassFromString(@"STUIStatusBar")]) {
+            break;
+        }
+        candidate = candidate.superview;
+        depth++;
+    }
+}
+
 static void svpnApplyStatusBarNavigationOffset(STUIStatusBarStringView *view) {
     if (!view || !svpnIsStatusBarNavigationView(view, view.frame)) return;
+    svpnAllowStatusBarNavigationOverflow(view);
     CGFloat offset = _isEnabled ? _breadcrumbVerticalOffset : 0.0;
     CGRect frame = view.frame;
     NSValue *lastShiftedValue = objc_getAssociatedObject(view, SVPNNavigationShiftedFrameKey);
@@ -766,6 +781,7 @@ static void ReloadPrefs() {
 
 - (void)setFrame:(CGRect)frame {
     if (svpnIsStatusBarNavigationView(self, frame)) {
+        svpnAllowStatusBarNavigationOverflow(self);
         NSValue *lastShiftedValue = objc_getAssociatedObject(self, SVPNNavigationShiftedFrameKey);
         CGRect lastShiftedFrame = lastShiftedValue ? lastShiftedValue.CGRectValue : CGRectNull;
         if (!lastShiftedValue || !CGRectEqualToRect(frame, lastShiftedFrame)) {
@@ -1091,7 +1107,7 @@ static void svpnInstallBreadcrumbDiagnostic(NSUInteger attempt) {
         return;
     }
 
-    svpnBreadcrumbLog(@"loaded version=2.1-52 bundle=%@ enabled=%d offset=%.2f", bundleIdentifier, _isEnabled, _breadcrumbVerticalOffset);
+    svpnBreadcrumbLog(@"loaded version=2.1-53 bundle=%@ enabled=%d offset=%.2f", bundleIdentifier, _isEnabled, _breadcrumbVerticalOffset);
 
     svpnStartTrafficTimer();
     CFNotificationCenterAddObserver(

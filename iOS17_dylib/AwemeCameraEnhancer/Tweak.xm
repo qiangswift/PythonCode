@@ -189,7 +189,11 @@ static void ACEInstallSettingsEntry(UIViewController *controller) {
 %end
 
 %hook ACCRecordConfigServiceImpl
-- (double)videoMaxDuration { double original = %orig; return ACEEnabled(kACEUnlimitedDurationKey) ? MAX(original, kACEMaxRecordDuration) : original; }
+- (double)videoMaxDuration {
+    double original = %orig;
+    if (!ACEEnabled(kACEUnlimitedDurationKey)) return original;
+    return MAX(original, kACEMaxRecordDuration);
+}
 %end
 
 %hook ACCRealLivePhotoServiceImpl

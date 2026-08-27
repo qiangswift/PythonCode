@@ -76,7 +76,8 @@ PhoenixVideoAdSkip 1.1.1 正在修正“商城”Tab 实际路由到福利页导
 - 已确认 Dopamine iOS 17 上 breadcrumb provider 会触发，但返回 action 集合为空。
 - App 进程内 Hook `UIStatusBarSystemNavigationItemView` 没有收到布局回调，因此已撤销全 App 注入思路。
 - 返回按钮继续保持 SpringBoard 侧安全诊断；下一步结合设备上的 SpringBoard、StatusStatusUI、StatusBar 和 NiceBarX 二进制确认实际显示项后再应用偏移。
-- v2.1-44 编译成功后自动下载 rootless deb 到 Downloads 供设备测试。
+- v2.1-44 已由新私有仓库 `qiangswift/PythonCode` 的 Actions run `33051988637` 成功编译 rootfull、rootless、roothide。
+- rootless 测试包：`C:\Users\liqiang\Downloads\com.82flex.singlevpn_2.1-44_iphoneos-arm64.deb`。
 
 ## 用户环境与交付偏好
 

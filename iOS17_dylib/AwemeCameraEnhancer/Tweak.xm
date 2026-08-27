@@ -3,6 +3,7 @@
 #import <Photos/Photos.h>
 #import <objc/message.h>
 #import <objc/runtime.h>
+#import <math.h>
 
 @interface ACCRecordSystemLivePhotoServiceImpl : NSObject
 - (void)setEnableSystemLivePhoto:(BOOL)enabled;
@@ -69,7 +70,25 @@ static NSHashTable<UIView *> *ACERightButtonViews(void) {
 static void ACEApplyRightButtonsOffset(UIView *view) {
     if (!view) return;
     [ACERightButtonViews() addObject:view];
-    view.transform = CGAffineTransformMakeTranslation(0, -ACERightButtonsOffset());
+    id configuredScale = [NSUserDefaults.standardUserDefaults objectForKey:@"DYYYElementScale"];
+    CGFloat scale = [configuredScale respondsToSelector:@selector(doubleValue)] ? [configuredScale doubleValue] : 0;
+    if (scale > 0 && fabs(scale - 1.0) > 0.0001) {
+        // DYYY rebuilds this transform during every layout. Recreate its scale and
+        // alignment compensation, then add our independent screen-point offset.
+        view.transform = CGAffineTransformIdentity;
+        CGFloat verticalCompensation = 0;
+        for (UIView *subview in [view.subviews copy]) {
+            CGFloat height = subview.frame.size.height;
+            verticalCompensation += (height - height * scale) / 2.0;
+        }
+        CGFloat width = view.frame.size.width;
+        CGFloat horizontalCompensation = (width - width * scale) / 2.0;
+        view.transform = CGAffineTransformMake(scale, 0, 0, scale,
+                                               horizontalCompensation,
+                                               verticalCompensation - ACERightButtonsOffset());
+    } else {
+        view.transform = CGAffineTransformMakeTranslation(0, -ACERightButtonsOffset());
+    }
 }
 
 static UIViewController *ACEViewControllerForView(UIView *view) {
@@ -338,7 +357,16 @@ static void ACEWaitForNativeLiveSources(id owner, NSUInteger attempt) {
             }
         }
     }
-    if (isRightStack) ACEApplyRightButtonsOffset(self);
+    if (isRightStack) {
+        ACEApplyRightButtonsOffset(self);
+        // Whichever tweak is outermost in the hook chain, run once after the
+        // current layout pass so DYYY cannot overwrite the combined transform.
+        __weak UIStackView *weakStack = self;
+        dispatch_async(dispatch_get_main_queue(), ^{
+            UIStackView *stack = weakStack;
+            if (stack.window) ACEApplyRightButtonsOffset(stack);
+        });
+    }
 }
 %end
 
@@ -420,7 +448,7 @@ static void ACEWaitForNativeLiveSources(id owner, NSUInteger attempt) {
     if (!item || !section) return original;
     item.identifier = @"com.swiftss.awemecameraenhancer.settings";
     item.title = @"相机增强";
-    item.detail = @"1.3.2";
+    item.detail = @"1.3.3";
     item.type = 0;
     item.svgIconImageName = @"ic_sapling_outlined";
     item.cellType = 26;

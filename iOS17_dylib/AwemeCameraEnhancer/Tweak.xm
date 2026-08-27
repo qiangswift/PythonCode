@@ -204,7 +204,10 @@ static void ACEInstallSettingsEntry(UIViewController *controller) {
 %end
 
 %hook ACCRecordFlowComponent
-- (void)didSetMaxDuration:(double)duration { %orig(ACEEnabled(kACEUnlimitedDurationKey) ? MAX(duration, kACEMaxRecordDuration) : duration); }
+- (void)didSetMaxDuration:(double)duration {
+    if (ACEEnabled(kACEUnlimitedDurationKey)) duration = MAX(duration, kACEMaxRecordDuration);
+    %orig;
+}
 - (void)onCaptureStillImageWithImage:(id)image error:(NSError *)error {
     gACECameraController = ACETopController(); %orig;
     if (ACEEnabled(kACEPhotoSaveKey) && !ACEEnabled(kACELivePhotoDefaultKey) && !error && [image isKindOfClass:UIImage.class]) ACESaveStatic(image, self);

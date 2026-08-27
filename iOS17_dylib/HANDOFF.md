@@ -95,6 +95,14 @@ PhoenixVideoAdSkip 1.1.1 正在修正“商城”Tab 实际路由到福利页导
 
 - `LechengSplashSkip/artifacts`
 - `ZhixingUpdateBlocker/analysis-tools`
+
+## SingleVPN v2.1-48 breadcrumb 精确诊断
+
+- v2.1-47 设备日志确认 `SBDeviceApplicationSceneStatusBarBreadcrumbProvider` 每次返回空集合，且 `UIStatusBarBreadcrumbItemView` 从未实例化，旧偏移 Hook 没有命中。
+- 实际可见状态栏为 `STUIStatusBar` / `STUIStatusBarForegroundView`，NiceBarX 流量视图类为 `BorderLabel`。
+- v2.1-48 逐项记录 `STUIStatusBar._items`、`_displayItemStates` 和 `_regions`，监听 `STUIStatusBarStringView` 文本变化，并记录 `STUIStatusBarImageView` 的图像、frame 和父视图链。
+- 新私有仓库提交：`664805fd`；GitHub Actions run：`33062112668`，rootfull、rootless、roothide 均成功。
+- rootless 测试包：`C:\Users\liqiang\Downloads\com.82flex.singlevpn_2.1-48_iphoneos-arm64.deb`。
 - 各项目的 `packages`、`.theos`、deb、IPA、日志和其他构建缓存
 
 处理这些内容前先确认用途，避免污染 Git 历史或公开敏感分析材料。

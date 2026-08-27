@@ -13,7 +13,6 @@
 @end
 
 static const NSTimeInterval kACEMaxRecordDuration = 86400.0;
-static NSString *const kACELogName = @"AwemeCameraEnhancer.log";
 static NSString *const kACEVideoDefaultKey = @"ACEVideoDefaultEnabled";
 static NSString *const kACEUnlimitedDurationKey = @"ACEUnlimitedDurationEnabled";
 static NSString *const kACELivePhotoDefaultKey = @"ACELivePhotoDefaultEnabled";
@@ -32,16 +31,7 @@ static BOOL ACEEnabled(NSString *key) {
     return [defaults objectForKey:key] == nil ? YES : [defaults boolForKey:key];
 }
 
-static void ACELog(NSString *format, ...) {
-    va_list args; va_start(args, format);
-    NSString *message = [[NSString alloc] initWithFormat:format arguments:args]; va_end(args);
-    NSString *documents = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES).firstObject;
-    NSString *path = [documents stringByAppendingPathComponent:kACELogName];
-    NSData *data = [[NSString stringWithFormat:@"%.3f %@\n", NSDate.date.timeIntervalSince1970, message] dataUsingEncoding:NSUTF8StringEncoding];
-    if (![[NSFileManager defaultManager] fileExistsAtPath:path]) { [data writeToFile:path atomically:YES]; return; }
-    NSFileHandle *handle = [NSFileHandle fileHandleForWritingAtPath:path];
-    [handle seekToEndOfFile]; [handle writeData:data]; [handle closeFile];
-}
+#define ACELog(...) do { } while (0)
 
 static UIViewController *ACETopController(void) {
     UIWindow *window = nil;
@@ -380,4 +370,4 @@ static void ACEInstallSettingsEntry(UIViewController *controller) {
 %end
 
 
-%ctor { @autoreleasepool { if ([NSBundle.mainBundle.bundleIdentifier isEqualToString:@"com.ss.iphone.ugc.Aweme"]) ACELog(@"START version=1.2.7 editor Live Photo pipeline"); } }
+%ctor { }

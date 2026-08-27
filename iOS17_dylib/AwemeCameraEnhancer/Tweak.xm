@@ -47,6 +47,8 @@ static BOOL gACEAwaitingNativeReturn = NO;
 static BOOL gACELiveSaveFinished = NO;
 static BOOL gACELiveSaveSucceeded = NO;
 static BOOL gACELiveSaveInProgress = NO;
+static char kACERightStackRegisteredKey;
+static char kACEApplyingTransformKey;
 
 static BOOL ACEEnabled(NSString *key) {
     NSUserDefaults *defaults = NSUserDefaults.standardUserDefaults;
@@ -70,6 +72,8 @@ static NSHashTable<UIView *> *ACERightButtonViews(void) {
 static void ACEApplyRightButtonsOffset(UIView *view) {
     if (!view) return;
     [ACERightButtonViews() addObject:view];
+    objc_setAssociatedObject(view, &kACERightStackRegisteredKey, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    objc_setAssociatedObject(view, &kACEApplyingTransformKey, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     id configuredScale = [NSUserDefaults.standardUserDefaults objectForKey:@"DYYYElementScale"];
     CGFloat scale = [configuredScale respondsToSelector:@selector(doubleValue)] ? [configuredScale doubleValue] : 0;
     if (scale > 0 && fabs(scale - 1.0) > 0.0001) {
@@ -89,6 +93,7 @@ static void ACEApplyRightButtonsOffset(UIView *view) {
     } else {
         view.transform = CGAffineTransformMakeTranslation(0, -ACERightButtonsOffset());
     }
+    objc_setAssociatedObject(view, &kACEApplyingTransformKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
 }
 
 static UIViewController *ACEViewControllerForView(UIView *view) {
@@ -336,6 +341,16 @@ static void ACEWaitForNativeLiveSources(id owner, NSUInteger attempt) {
 %end
 
 %hook UIStackView
+- (void)setTransform:(CGAffineTransform)transform {
+    BOOL registered = [objc_getAssociatedObject(self, &kACERightStackRegisteredKey) boolValue];
+    BOOL applying = [objc_getAssociatedObject(self, &kACEApplyingTransformKey) boolValue];
+    if (registered && !applying) {
+        // DYYY assigns a fresh scale transform on every reused feed cell. Add the
+        // offset at the assignment boundary so video changes cannot erase it.
+        transform.ty -= ACERightButtonsOffset();
+    }
+    %orig(transform);
+}
 - (void)layoutSubviews {
     %orig;
     UIViewController *controller = ACEViewControllerForView(self);
@@ -359,13 +374,6 @@ static void ACEWaitForNativeLiveSources(id owner, NSUInteger attempt) {
     }
     if (isRightStack) {
         ACEApplyRightButtonsOffset(self);
-        // Whichever tweak is outermost in the hook chain, run once after the
-        // current layout pass so DYYY cannot overwrite the combined transform.
-        __weak UIStackView *weakStack = self;
-        dispatch_async(dispatch_get_main_queue(), ^{
-            UIStackView *stack = weakStack;
-            if (stack.window) ACEApplyRightButtonsOffset(stack);
-        });
     }
 }
 %end
@@ -448,7 +456,7 @@ static void ACEWaitForNativeLiveSources(id owner, NSUInteger attempt) {
     if (!item || !section) return original;
     item.identifier = @"com.swiftss.awemecameraenhancer.settings";
     item.title = @"相机增强";
-    item.detail = @"1.3.3";
+    item.detail = @"1.3.4";
     item.type = 0;
     item.svgIconImageName = @"ic_sapling_outlined";
     item.cellType = 26;

@@ -177,3 +177,11 @@ PhoenixVideoAdSkip 1.1.1 正在修正“商城”Tab 实际路由到福利页导
 - 安装脚本只清理历史调试文件 `com.82flex.singlevpn.breadcrumb.log` 与 `SingleVPNBreadcrumb.log`，正式版不再生成这些日志。
 - 私有仓库提交：`ff0b00f7`；GitHub Actions run `33067785744` 的 rootfull、rootless、roothide 及 Release 均成功。
 - rootless 正式包：`C:\Users\liqiang\Downloads\com.82flex.singlevpn_2.2.0_iphoneos-arm64.deb`。
+
+## QDReaderAutoCheckin 1.2.7 自有商业开屏
+
+- 对 QDReader App Store 5.9.474 砸壳包确认截图中的书籍推广走起点自有 `QDCommercialSplashHelper -> QDSplashView`，不是 Pangle/GDT。
+- 新版通过 `shouldShowCommercialSplashAd` 与 `showCommercialSplashScreen` 两个原生布尔决策入口报告“本次不展示”，同时设置本次启动状态；不截断无返回值的加载/展示流程，避免启动协调器卡死。
+- 独立旧仓库提交：`ecd3aa4`，但 `swiftss` Actions run `33071235798` 因账户 billing 限制未启动任何构建步骤。
+- 源码快照与新工作流已提交至私有仓库 `qiangswift/PythonCode`，提交：`f1c8e20b`；Actions run `33071383122` 的 rootfull、rootless、roothide 均成功。
+- rootless 测试包：`C:\Users\liqiang\Downloads\com.swiftss.qdreaderautocheckin_1.2.7_iphoneos-arm64.deb`。

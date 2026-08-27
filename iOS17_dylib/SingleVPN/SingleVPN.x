@@ -228,17 +228,15 @@ static void svpnAllowStatusBarNavigationOverflow(UIView *view) {
 }
 
 static void svpnApplyStatusBarNavigationOffset(STUIStatusBarStringView *view) {
-    if (!view || !svpnIsStatusBarNavigationView(view, view.frame)) return;
+    NSNumber *navigationMarker = view ? objc_getAssociatedObject(view, SVPNNavigationShiftedFrameKey) : nil;
+    if (!view || (!navigationMarker.boolValue && !svpnIsStatusBarNavigationView(view, view.frame))) return;
     svpnAllowStatusBarNavigationOverflow(view);
+    view.clipsToBounds = NO;
+    view.layer.masksToBounds = NO;
     CGFloat offset = _isEnabled ? _breadcrumbVerticalOffset : 0.0;
-    CGRect frame = view.frame;
-    NSValue *lastShiftedValue = objc_getAssociatedObject(view, SVPNNavigationShiftedFrameKey);
-    if (!lastShiftedValue) {
-        frame.origin.y += offset;
-        objc_setAssociatedObject(view, SVPNNavigationShiftedFrameKey,
-            [NSValue valueWithCGRect:frame], OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-        view.frame = frame;
-    }
+    CGRect bounds = view.bounds;
+    bounds.origin.y = -offset;
+    view.bounds = bounds;
     NSNumber *lastOffset = objc_getAssociatedObject(view, @selector(svpnApply5GAdvancedAttributesIfNeeded));
     if (!lastOffset || fabs(lastOffset.doubleValue - offset) > 0.01) {
         objc_setAssociatedObject(view, @selector(svpnApply5GAdvancedAttributesIfNeeded), @(offset), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
@@ -429,19 +427,11 @@ static NSString *svpnCompactTrafficValue(unsigned long long bytes) {
         : [NSString stringWithFormat:@"%.2f%@", value, units[unitIndex]];
 }
 
-static NSString *svpnTrafficColumn(BOOL wifi) {
-    NSUserDefaults *defaults = svpnDefaults();
-    NSString *uploadKey = wifi ? SVPNWifiUploadKey : SVPNCellularUploadKey;
-    NSString *downloadKey = wifi ? SVPNWifiDownloadKey : SVPNCellularDownloadKey;
-    NSString *name = wifi ? @"WiFi" : @"5G";
-    return [NSString stringWithFormat:@"%@↑：%@\n%@↓：%@",
-        name, svpnCompactTrafficValue([[defaults objectForKey:uploadKey] unsignedLongLongValue]),
-        name, svpnCompactTrafficValue([[defaults objectForKey:downloadKey] unsignedLongLongValue])];
-}
-
 static const void *SVPNTrafficLabelKey = &SVPNTrafficLabelKey;
 static const void *SVPNTrafficLeftLabelKey = &SVPNTrafficLeftLabelKey;
 static const void *SVPNTrafficRightLabelKey = &SVPNTrafficRightLabelKey;
+static const void *SVPNTrafficLeftValueLabelKey = &SVPNTrafficLeftValueLabelKey;
+static const void *SVPNTrafficRightValueLabelKey = &SVPNTrafficRightValueLabelKey;
 
 static UIWindow *svpnSettingsKeyWindow(void) {
     for (UIScene *scene in UIApplication.sharedApplication.connectedScenes) {
@@ -506,10 +496,16 @@ static void svpnInstallIndependentSettingsTrafficLabel(void) {
         trafficView.accessibilityIdentifier = @"SingleVPNTrafficSummary";
 
         UIFont *font = [UIFont monospacedSystemFontOfSize:10.5 weight:UIFontWeightRegular];
-        for (NSNumber *column in @[ @0, @1 ]) {
+        NSArray<NSValue *> *labelKeys = @[
+            [NSValue valueWithPointer:SVPNTrafficLeftLabelKey],
+            [NSValue valueWithPointer:SVPNTrafficLeftValueLabelKey],
+            [NSValue valueWithPointer:SVPNTrafficRightLabelKey],
+            [NSValue valueWithPointer:SVPNTrafficRightValueLabelKey]
+        ];
+        for (NSUInteger index = 0; index < labelKeys.count; index++) {
             UILabel *columnLabel = [[UILabel alloc] initWithFrame:CGRectZero];
             columnLabel.backgroundColor = UIColor.clearColor;
-            columnLabel.textAlignment = NSTextAlignmentLeft;
+            columnLabel.textAlignment = (index == 1 || index == 3) ? NSTextAlignmentRight : NSTextAlignmentLeft;
             columnLabel.textColor = UIColor.secondaryLabelColor;
             columnLabel.font = font;
             columnLabel.numberOfLines = 2;
@@ -517,8 +513,7 @@ static void svpnInstallIndependentSettingsTrafficLabel(void) {
             columnLabel.minimumScaleFactor = 0.76;
             columnLabel.userInteractionEnabled = NO;
             [trafficView addSubview:columnLabel];
-            objc_setAssociatedObject(trafficView,
-                column.boolValue ? SVPNTrafficRightLabelKey : SVPNTrafficLeftLabelKey,
+            objc_setAssociatedObject(trafficView, labelKeys[index].pointerValue,
                 columnLabel, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
         }
         objc_setAssociatedObject(window, SVPNTrafficLabelKey, trafficView, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
@@ -537,23 +532,34 @@ static void svpnInstallIndependentSettingsTrafficLabel(void) {
     trafficView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
 
     UILabel *leftLabel = objc_getAssociatedObject(trafficView, SVPNTrafficLeftLabelKey);
+    UILabel *leftValueLabel = objc_getAssociatedObject(trafficView, SVPNTrafficLeftValueLabelKey);
     UILabel *rightLabel = objc_getAssociatedObject(trafficView, SVPNTrafficRightLabelKey);
-    leftLabel.text = svpnTrafficColumn(NO);
-    rightLabel.text = svpnTrafficColumn(YES);
+    UILabel *rightValueLabel = objc_getAssociatedObject(trafficView, SVPNTrafficRightValueLabelKey);
+    NSUserDefaults *defaults = svpnDefaults();
+    leftLabel.text = @"5G↑：\n5G↓：";
+    leftValueLabel.text = [NSString stringWithFormat:@"%@\n%@",
+        svpnCompactTrafficValue([[defaults objectForKey:SVPNCellularUploadKey] unsignedLongLongValue]),
+        svpnCompactTrafficValue([[defaults objectForKey:SVPNCellularDownloadKey] unsignedLongLongValue])];
+    rightLabel.text = @"WiFi↑：\nWiFi↓：";
+    rightValueLabel.text = [NSString stringWithFormat:@"%@\n%@",
+        svpnCompactTrafficValue([[defaults objectForKey:SVPNWifiUploadKey] unsignedLongLongValue]),
+        svpnCompactTrafficValue([[defaults objectForKey:SVPNWifiDownloadKey] unsignedLongLongValue])];
 
-    CGFloat gap = 10.0;
+    CGFloat valueGap = 2.0;
+    CGFloat groupGap = 10.0;
     CGSize fittingSize = CGSizeMake(CGFLOAT_MAX, trafficView.bounds.size.height);
-    CGFloat leftWidth = ceil([leftLabel sizeThatFits:fittingSize].width);
-    CGFloat rightWidth = ceil([rightLabel sizeThatFits:fittingSize].width);
-    CGFloat availableWidth = MAX(0.0, trafficView.bounds.size.width);
-    CGFloat naturalWidth = leftWidth + gap + rightWidth;
-    if (naturalWidth > availableWidth && naturalWidth > 0.0) {
-        CGFloat scale = availableWidth / naturalWidth;
-        leftWidth = floor(leftWidth * scale);
-        rightWidth = MAX(0.0, availableWidth - leftWidth - gap);
-    }
-    leftLabel.frame = CGRectMake(0.0, 0.0, leftWidth, trafficView.bounds.size.height);
-    rightLabel.frame = CGRectMake(leftWidth + gap, 0.0, rightWidth, trafficView.bounds.size.height);
+    CGFloat leftPrefixWidth = ceil([leftLabel sizeThatFits:fittingSize].width);
+    CGFloat leftValueWidth = ceil([leftValueLabel sizeThatFits:fittingSize].width);
+    CGFloat rightPrefixWidth = ceil([rightLabel sizeThatFits:fittingSize].width);
+    CGFloat rightValueWidth = ceil([rightValueLabel sizeThatFits:fittingSize].width);
+    CGFloat x = 0.0;
+    leftLabel.frame = CGRectMake(x, 0.0, leftPrefixWidth, trafficView.bounds.size.height);
+    x += leftPrefixWidth + valueGap;
+    leftValueLabel.frame = CGRectMake(x, 0.0, leftValueWidth, trafficView.bounds.size.height);
+    x += leftValueWidth + groupGap;
+    rightLabel.frame = CGRectMake(x, 0.0, rightPrefixWidth, trafficView.bounds.size.height);
+    x += rightPrefixWidth + valueGap;
+    rightValueLabel.frame = CGRectMake(x, 0.0, rightValueWidth, trafficView.bounds.size.height);
 }
 
 static void svpnStartSettingsOverlayTimer(void) {
@@ -780,19 +786,11 @@ static void ReloadPrefs() {
 %hook STUIStatusBarStringView
 
 - (void)setFrame:(CGRect)frame {
-    if (svpnIsStatusBarNavigationView(self, frame)) {
-        svpnAllowStatusBarNavigationOverflow(self);
-        NSValue *lastShiftedValue = objc_getAssociatedObject(self, SVPNNavigationShiftedFrameKey);
-        CGRect lastShiftedFrame = lastShiftedValue ? lastShiftedValue.CGRectValue : CGRectNull;
-        if (!lastShiftedValue || !CGRectEqualToRect(frame, lastShiftedFrame)) {
-            frame.origin.y += _isEnabled ? _breadcrumbVerticalOffset : 0.0;
-        }
-        objc_setAssociatedObject(self, SVPNNavigationShiftedFrameKey,
-            [NSValue valueWithCGRect:frame], OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-    } else {
-        objc_setAssociatedObject(self, SVPNNavigationShiftedFrameKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-    }
+    BOOL navigationView = svpnIsStatusBarNavigationView(self, frame);
+    objc_setAssociatedObject(self, SVPNNavigationShiftedFrameKey,
+        navigationView ? @YES : nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     %orig(frame);
+    if (navigationView) svpnApplyStatusBarNavigationOffset(self);
 }
 
 %new
@@ -1107,7 +1105,7 @@ static void svpnInstallBreadcrumbDiagnostic(NSUInteger attempt) {
         return;
     }
 
-    svpnBreadcrumbLog(@"loaded version=2.1-53 bundle=%@ enabled=%d offset=%.2f", bundleIdentifier, _isEnabled, _breadcrumbVerticalOffset);
+    svpnBreadcrumbLog(@"loaded version=2.1-54 bundle=%@ enabled=%d offset=%.2f", bundleIdentifier, _isEnabled, _breadcrumbVerticalOffset);
 
     svpnStartTrafficTimer();
     CFNotificationCenterAddObserver(

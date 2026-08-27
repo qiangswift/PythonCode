@@ -212,12 +212,17 @@ static NSString *svpnSuperviewChain(UIView *view) {
     return [parts componentsJoinedByString:@" <- "];
 }
 
-static BOOL svpnIsStatusBarNavigationText(NSString *text) {
-    return text.length > 0 && [text rangeOfString:@"◀"].location != NSNotFound;
+static BOOL svpnIsStatusBarNavigationView(STUIStatusBarStringView *view, CGRect proposedFrame) {
+    NSString *text = view.text ?: @"";
+    if ([text rangeOfString:@"◀"].location != NSNotFound) return YES;
+    if (!text.length || [text rangeOfString:@"\n"].location != NSNotFound) return NO;
+    BOOL bottomLeadingGeometry = proposedFrame.size.height > 0.0 && proposedFrame.size.height <= 22.0
+        && proposedFrame.origin.y >= 20.0 && proposedFrame.origin.x < 130.0;
+    return bottomLeadingGeometry && !IsNetworkTypeText(text);
 }
 
 static void svpnApplyStatusBarNavigationOffset(STUIStatusBarStringView *view) {
-    if (!view || !svpnIsStatusBarNavigationText(view.text)) return;
+    if (!view || !svpnIsStatusBarNavigationView(view, view.frame)) return;
     CGFloat offset = _isEnabled ? _breadcrumbVerticalOffset : 0.0;
     CGRect frame = view.frame;
     NSValue *lastShiftedValue = objc_getAssociatedObject(view, SVPNNavigationShiftedFrameKey);
@@ -758,7 +763,7 @@ static void ReloadPrefs() {
 %hook STUIStatusBarStringView
 
 - (void)setFrame:(CGRect)frame {
-    if (svpnIsStatusBarNavigationText(self.text)) {
+    if (svpnIsStatusBarNavigationView(self, frame)) {
         NSValue *lastShiftedValue = objc_getAssociatedObject(self, SVPNNavigationShiftedFrameKey);
         CGRect lastShiftedFrame = lastShiftedValue ? lastShiftedValue.CGRectValue : CGRectNull;
         if (!lastShiftedValue || !CGRectEqualToRect(frame, lastShiftedFrame)) {
@@ -847,16 +852,6 @@ static void ReloadPrefs() {
     }
 
     %orig;
-
-    if ([NSBundle.mainBundle.bundleIdentifier isEqualToString:@"com.apple.springboard"]) {
-        NSString *previous = objc_getAssociatedObject(self, @selector(setText:));
-        NSString *current = self.text ?: text ?: @"";
-        if (![previous isEqualToString:current]) {
-            objc_setAssociatedObject(self, @selector(setText:), current, OBJC_ASSOCIATION_COPY_NONATOMIC);
-            svpnBreadcrumbLog(@"status string changed view=%p text=%@ frame=%@ window=%@ chain=%@",
-                self, current, NSStringFromCGRect(self.frame), NSStringFromClass(self.window.class), svpnSuperviewChain(self));
-        }
-    }
 
     BOOL decision = _isEnabledReversed ? !_isVPNEnabled : _isVPNEnabled;
     if (decision && IsNetworkTypeText(text)) {
@@ -1094,7 +1089,7 @@ static void svpnInstallBreadcrumbDiagnostic(NSUInteger attempt) {
         return;
     }
 
-    svpnBreadcrumbLog(@"loaded version=2.1-50 bundle=%@ enabled=%d offset=%.2f", bundleIdentifier, _isEnabled, _breadcrumbVerticalOffset);
+    svpnBreadcrumbLog(@"loaded version=2.1-51 bundle=%@ enabled=%d offset=%.2f", bundleIdentifier, _isEnabled, _breadcrumbVerticalOffset);
 
     svpnStartTrafficTimer();
     CFNotificationCenterAddObserver(

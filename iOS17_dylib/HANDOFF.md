@@ -49,6 +49,14 @@
 
 ## GitHub Actions
 
+### AwemeCameraEnhancer 1.2.0
+
+- GitHub Actions run `33042318144` succeeded in `qiangswift/PythonCode`.
+- Removed the delayed runtime Live Photo experiment scan that could dismiss the first camera entry.
+- Native Live Photo mode/capture hooks now request mode `1`; the callback saves photo and paired-video resources together, then returns to the camera and displays a save toast.
+- Settings entry now covers the old and new Douyin settings controller classes.
+- Rootless package: `C:\Users\liqiang\Downloads\com.swiftss.awemecameraenhancer_1.2.0_iphoneos-arm64.deb`.
+
 以下父仓库工作流已更新为 `iOS17_dylib/<ProjectName>/` 路径：
 
 - `china-mobile-splash-ad-blocker.yml`

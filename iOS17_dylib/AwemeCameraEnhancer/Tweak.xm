@@ -3,16 +3,13 @@
 #import <Photos/Photos.h>
 #import <objc/message.h>
 
-@interface ACCRecordFlowComponent : NSObject
-- (void)restoreRecordButtonState;
-- (void)clearSystemLivePhotoData:(id)completion;
+@interface ACCRecordSystemLivePhotoServiceImpl : NSObject
+- (void)setEnableSystemLivePhoto:(BOOL)enabled;
+- (void)toggleLivePhotoInnerSwitch:(BOOL)enabled;
+- (void)reopenSystemLivePhotoRecording;
 @end
-@interface ACCSystemLivePhotoFlowComponent : NSObject
-- (void)takeLivePhotoPicture;
-@end
-@interface ACCRealLivePhotoServiceImpl : NSObject
-- (void)changeLivePhotoToMode:(unsigned long long)mode;
-- (void)updateLivePhotoBarItem;
+@interface ACCVideoEditFlowControlComponent : NSObject
+- (BOOL)backToShootNeedAlert:(BOOL)needAlert;
 @end
 
 static const NSTimeInterval kACEMaxRecordDuration = 86400.0;
@@ -23,10 +20,11 @@ static NSString *const kACELivePhotoDefaultKey = @"ACELivePhotoDefaultEnabled";
 static NSString *const kACEPhotoSaveKey = @"ACEPhotoAutoSaveEnabled";
 static __weak UIViewController *gACECameraController;
 static NSUInteger gACECameraEntryCount = 0;
-static __weak ACCRealLivePhotoServiceImpl *gACELivePhotoService;
-static __weak id gACESystemLivePhotoService;
-static NSUInteger gACEStillCaptureGeneration = 0;
-static NSUInteger gACELiveCallbackGeneration = 0;
+static __weak ACCRecordSystemLivePhotoServiceImpl *gACESystemLivePhotoService;
+static __weak ACCVideoEditFlowControlComponent *gACEEditFlowControl;
+static BOOL gACEAwaitingNativeReturn = NO;
+static BOOL gACELiveSaveFinished = NO;
+static BOOL gACELiveSaveSucceeded = NO;
 
 static BOOL ACEEnabled(NSString *key) {
     NSUserDefaults *defaults = NSUserDefaults.standardUserDefaults;
@@ -69,12 +67,6 @@ static void ACETraceCameraEntry(NSString *source) {
             UIViewController *top = ACETopController();
             ACELog(@"ENTRY #%lu after=%.2f top=%@ presented=%d", (unsigned long)entry, delay.doubleValue,
                    NSStringFromClass(top.class), top.presentingViewController != nil);
-            if (ACEEnabled(kACELivePhotoDefaultKey) && gACELivePhotoService &&
-                ([NSStringFromClass(top.class) isEqualToString:@"AWERecorderViewController"])) {
-                [gACELivePhotoService changeLivePhotoToMode:1];
-                [gACELivePhotoService updateLivePhotoBarItem];
-                ACELog(@"LIVE native mode and bar refreshed after=%.2f", delay.doubleValue);
-            }
         });
     }
 }
@@ -100,20 +92,17 @@ static void ACEShowToast(UIViewController *controller, NSString *text) {
     }];
 }
 
-static void ACEReturnToCamera(ACCRecordFlowComponent *flow, BOOL saved) {
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.45 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        if ([flow respondsToSelector:@selector(clearSystemLivePhotoData:)]) [flow clearSystemLivePhotoData:^{}];
-        if ([flow respondsToSelector:@selector(restoreRecordButtonState)]) [flow restoreRecordButtonState];
-        UIViewController *camera = gACECameraController, *top = ACETopController();
-        if (camera && top != camera) {
-            UINavigationController *navigation = top.navigationController;
-            if (navigation && [navigation.viewControllers containsObject:camera]) [navigation popToViewController:camera animated:YES];
-            else if (top.presentingViewController) [top dismissViewControllerAnimated:YES completion:nil];
-        }
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.35 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-            ACEShowToast(camera ?: ACETopController(), saved ? @"照片已保存到相册" : @"照片保存失败");
+static void ACETryNativeReturn(void) {
+    dispatch_async(dispatch_get_main_queue(), ^{
+        if (!gACEAwaitingNativeReturn || !gACELiveSaveFinished || !gACEEditFlowControl) return;
+        ACCVideoEditFlowControlComponent *flow = gACEEditFlowControl;
+        gACEAwaitingNativeReturn = NO;
+        BOOL saved = gACELiveSaveSucceeded;
+        BOOL handled = [flow backToShootNeedAlert:NO];
+        ACELog(@"LIVE native back-to-shoot handled=%d saved=%d", handled, saved);
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.8 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            ACEShowToast(gACECameraController ?: ACETopController(), saved ? @"照片已保存到相册" : @"动态照片保存失败");
         });
-        ACELog(@"PHOTO returned-to-camera saved=%d", saved);
     });
 }
 
@@ -134,32 +123,69 @@ static NSURL *ACEFileURL(id object, NSArray<NSString *> *keys) {
     return nil;
 }
 
-static void ACESaveStatic(UIImage *image, ACCRecordFlowComponent *flow) {
+static void ACESaveStatic(UIImage *image) {
     [[PHPhotoLibrary sharedPhotoLibrary] performChanges:^{ [PHAssetChangeRequest creationRequestForAssetFromImage:image]; }
                                       completionHandler:^(BOOL success, NSError *error) {
-        ACELog(@"PHOTO static saved=%d error=%@", success, error); ACEReturnToCamera(flow, success);
+        ACELog(@"PHOTO static saved=%d error=%@", success, error);
+        gACELiveSaveSucceeded = success;
+        gACELiveSaveFinished = YES;
+        ACETryNativeReturn();
     }];
 }
 
-static BOOL ACESaveLive(id picture, ACCRecordFlowComponent *flow) {
-    NSArray *imageKeys = @[@"livePhotoImageFileURL", @"livePhotoImageURL", @"livePhotoImagePath", @"imageFileURL", @"imageURL", @"imagePath"];
-    NSArray *videoKeys = @[@"livePhotoVideoFileURL", @"livePhotoVideoURL", @"livePhotoVideoPath", @"livePhotoVideoFilePath", @"systemLivePhotoVideoFramePath", @"videoURL", @"videoPath"];
-    NSURL *imageURL = ACEFileURL(picture, imageKeys) ?: ACEFileURL(flow, imageKeys);
-    NSURL *videoURL = ACEFileURL(picture, videoKeys) ?: ACEFileURL(flow, videoKeys);
-    UIImage *image = [picture isKindOfClass:UIImage.class] ? picture : ACEValue(picture, @"image");
-    NSData *imageData = imageURL ? [NSData dataWithContentsOfURL:imageURL] : ([image isKindOfClass:UIImage.class] ? UIImageJPEGRepresentation(image, 0.98) : nil);
-    if (!imageData || !videoURL) {
-        ACELog(@"LIVE_PHOTO resources missing picture=%@ image=%@ video=%@", NSStringFromClass([picture class]), imageURL, videoURL);
-        return NO;
+static void ACEFinishLiveSave(BOOL success, NSError *error) {
+    gACELiveSaveSucceeded = success;
+    gACELiveSaveFinished = YES;
+    ACELog(@"LIVE_PHOTO paired saved=%d error=%@", success, error);
+    ACETryNativeReturn();
+}
+
+static void ACEGenerateAndSaveLivePair(NSURL *sourceImage, NSURL *sourceVideo) {
+    Class manager = NSClassFromString(@"CAKOnlineResourceManager");
+    SEL selector = NSSelectorFromString(@"generateLivePhotoFromStillImage:videoURL:outputDirectory:completion:");
+    if (!manager || ![manager respondsToSelector:selector]) {
+        ACEFinishLiveSave(NO, [NSError errorWithDomain:@"AwemeCameraEnhancer" code:1 userInfo:@{NSLocalizedDescriptionKey:@"Live Photo generator unavailable"}]);
+        return;
     }
-    [[PHPhotoLibrary sharedPhotoLibrary] performChanges:^{
-        PHAssetCreationRequest *request = [PHAssetCreationRequest creationRequestForAsset];
-        [request addResourceWithType:PHAssetResourceTypePhoto data:imageData options:nil];
-        [request addResourceWithType:PHAssetResourceTypePairedVideo fileURL:videoURL options:nil];
-    } completionHandler:^(BOOL success, NSError *error) {
-        ACELog(@"LIVE_PHOTO paired saved=%d error=%@", success, error); ACEReturnToCamera(flow, success);
-    }];
-    return YES;
+    NSString *folder = [NSTemporaryDirectory() stringByAppendingPathComponent:[NSString stringWithFormat:@"ACE-Live-%@", NSUUID.UUID.UUIDString]];
+    [[NSFileManager defaultManager] createDirectoryAtPath:folder withIntermediateDirectories:YES attributes:nil error:nil];
+    NSURL *directory = [NSURL fileURLWithPath:folder isDirectory:YES];
+    ACELog(@"LIVE_PHOTO generating image=%@ video=%@", sourceImage.path, sourceVideo.path);
+    void (^completion)(NSURL *, NSURL *, NSError *) = ^(NSURL *pairedImage, NSURL *pairedVideo, NSError *generationError) {
+        if (generationError || !pairedImage.isFileURL || !pairedVideo.isFileURL) {
+            ACEFinishLiveSave(NO, generationError ?: [NSError errorWithDomain:@"AwemeCameraEnhancer" code:2 userInfo:nil]);
+            return;
+        }
+        [[PHPhotoLibrary sharedPhotoLibrary] performChanges:^{
+            PHAssetCreationRequest *request = [PHAssetCreationRequest creationRequestForAsset];
+            [request addResourceWithType:PHAssetResourceTypePhoto fileURL:pairedImage options:nil];
+            [request addResourceWithType:PHAssetResourceTypePairedVideo fileURL:pairedVideo options:nil];
+        } completionHandler:^(BOOL success, NSError *error) {
+            [[NSFileManager defaultManager] removeItemAtURL:directory error:nil];
+            ACEFinishLiveSave(success, error);
+        }];
+    };
+    ((void (*)(id, SEL, NSURL *, NSURL *, NSURL *, id))objc_msgSend)(manager, selector, sourceImage, sourceVideo, directory, completion);
+}
+
+static void ACEWaitForNativeLiveSources(id flow, NSUInteger attempt) {
+    id repository = ACEValue(flow, @"repository");
+    id info = ACEValue(repository, @"repoLivePhotoInfoInstance");
+    NSURL *imageURL = ACEFileURL(info, @[@"livePhotoImageSourceUrl"]);
+    NSURL *videoURL = ACEFileURL(info, @[@"livePhotoVideoSourceUrl"]);
+    if (imageURL && videoURL) {
+        ACELog(@"LIVE_PHOTO native sources ready attempt=%lu", (unsigned long)attempt);
+        ACEGenerateAndSaveLivePair(imageURL, videoURL);
+        return;
+    }
+    if (attempt >= 30) {
+        ACELog(@"LIVE_PHOTO native source timeout info=%@ image=%@ video=%@", info, imageURL, videoURL);
+        ACEFinishLiveSave(NO, [NSError errorWithDomain:@"AwemeCameraEnhancer" code:3 userInfo:nil]);
+        return;
+    }
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.2 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        ACEWaitForNativeLiveSources(flow, attempt + 1);
+    });
 }
 
 @interface ACEPreferencesController : UITableViewController @end
@@ -247,76 +273,28 @@ static void ACEInstallSettingsEntry(UIViewController *controller) {
 }
 %end
 
-%hook ACCRealLivePhotoServiceImpl
-- (id)init {
+%hook ACCRecordSystemLivePhotoServiceImpl
+- (id)initWithPublishModel:(id)publishModel serviceProvider:(id)provider featureConfig:(id)featureConfig {
     id result = %orig;
-    gACELivePhotoService = result;
-    ACELog(@"LIVE service initialized class=%@", NSStringFromClass([result class]));
+    gACESystemLivePhotoService = result;
+    ACELog(@"LIVE native record service initialized class=%@", NSStringFromClass([result class]));
     if (ACEEnabled(kACELivePhotoDefaultKey)) {
         dispatch_async(dispatch_get_main_queue(), ^{
-            ACCRealLivePhotoServiceImpl *service = result;
-            [service changeLivePhotoToMode:1];
-            [service updateLivePhotoBarItem];
-            ACELog(@"LIVE service-init mode and bar refreshed immediately");
+            ACCRecordSystemLivePhotoServiceImpl *service = result;
+            [service setEnableSystemLivePhoto:YES];
+            [service toggleLivePhotoInnerSwitch:YES];
+            ACELog(@"LIVE native inner switch enabled");
             dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.35 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-                [service changeLivePhotoToMode:1];
-                [service updateLivePhotoBarItem];
-                ACELog(@"LIVE service-init mode and bar refreshed delayed");
+                [service reopenSystemLivePhotoRecording];
+                ACELog(@"LIVE native recording reopened");
             });
         });
     }
     return result;
 }
-- (void)changeLivePhotoToMode:(unsigned long long)mode {
-    if (ACEEnabled(kACELivePhotoDefaultKey)) mode = 1;
-    ACELog(@"LIVE selected mode=%llu", mode);
-    %orig;
-}
-- (void)changeLivePhotoToMode:(unsigned long long)mode updateBlock:(id)block {
-    if (ACEEnabled(kACELivePhotoDefaultKey)) mode = 1;
-    ACELog(@"LIVE selected mode-block=%llu", mode);
-    %orig;
-}
-%end
-
-%hook ACCRecordSystemLivePhotoServiceImpl
-- (BOOL)systemLivePhotoOpened {
-    gACESystemLivePhotoService = self;
-    BOOL original = %orig;
-    BOOL enabled = ACEEnabled(kACELivePhotoDefaultKey) ? YES : original;
-    ACELog(@"LIVE system-opened original=%d result=%d", original, enabled);
-    return enabled;
-}
 - (void)takeLivePhotoPicture {
     gACESystemLivePhotoService = self;
     ACELog(@"LIVE native service take-picture");
-    %orig;
-}
-%end
-
-%hook ACCPictureFlowComponent
-- (void)tryTakePicture {
-    if (ACEEnabled(kACELivePhotoDefaultKey)) {
-        id service = ACEValue(self, @"systemLivePhotoService") ?: gACESystemLivePhotoService;
-        SEL selector = NSSelectorFromString(@"takeLivePhotoPicture");
-        if ([service respondsToSelector:selector]) {
-            ACELog(@"LIVE redirect picture flow service=%@", NSStringFromClass([service class]));
-            ((void (*)(id, SEL))objc_msgSend)(service, selector);
-            return;
-        }
-        ACELog(@"LIVE redirect unavailable system-service=%@", NSStringFromClass([service class]));
-    }
-    %orig;
-}
-%end
-
-%hook ACCSystemLivePhotoFlowComponent
-- (void)tryTakePicture {
-    if (ACEEnabled(kACELivePhotoDefaultKey)) {
-        ACELog(@"LIVE force native capture");
-        [self takeLivePhotoPicture];
-        return;
-    }
     %orig;
 }
 %end
@@ -330,24 +308,28 @@ static void ACEInstallSettingsEntry(UIViewController *controller) {
     gACECameraController = ACETopController(); %orig;
     if (!ACEEnabled(kACEPhotoSaveKey) || error || ![image isKindOfClass:UIImage.class]) return;
     if (!ACEEnabled(kACELivePhotoDefaultKey)) {
-        ACESaveStatic(image, self);
-        return;
+        gACEAwaitingNativeReturn = YES;
+        gACELiveSaveFinished = NO;
+        gACELiveSaveSucceeded = NO;
+        ACESaveStatic(image);
     }
-    NSUInteger token = ++gACEStillCaptureGeneration;
-    NSUInteger liveGeneration = gACELiveCallbackGeneration;
-    UIImage *fallbackImage = image;
-    ACELog(@"LIVE still callback waiting paired token=%lu", (unsigned long)token);
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        if (token == gACEStillCaptureGeneration && liveGeneration == gACELiveCallbackGeneration) {
-            ACELog(@"LIVE paired callback timeout; save static fallback token=%lu", (unsigned long)token);
-            ACESaveStatic(fallbackImage, self);
-        }
-    });
 }
 - (void)flowServiceDidSystemLivePhotoWithPicture:(id)picture {
-    gACELiveCallbackGeneration++;
     ACELog(@"LIVE captured class=%@ value=%@", NSStringFromClass([picture class]), picture); %orig;
-    if (ACEEnabled(kACEPhotoSaveKey) && !ACESaveLive(picture, self)) ACELog(@"LIVE paired asset unavailable; static fallback intentionally skipped");
+    if (!ACEEnabled(kACEPhotoSaveKey)) return;
+    gACEAwaitingNativeReturn = YES;
+    gACELiveSaveFinished = NO;
+    gACELiveSaveSucceeded = NO;
+    ACEWaitForNativeLiveSources(self, 0);
+}
+%end
+
+%hook ACCVideoEditFlowControlComponent
+- (void)componentDidAppear {
+    %orig;
+    gACEEditFlowControl = self;
+    ACELog(@"LIVE edit flow appeared awaiting=%d saveFinished=%d", gACEAwaitingNativeReturn, gACELiveSaveFinished);
+    ACETryNativeReturn();
 }
 %end
 
@@ -383,4 +365,4 @@ static void ACEInstallSettingsEntry(UIViewController *controller) {
 %end
 
 
-%ctor { @autoreleasepool { if ([NSBundle.mainBundle.bundleIdentifier isEqualToString:@"com.ss.iphone.ugc.Aweme"]) ACELog(@"START version=1.2.5 service-init Live Photo"); } }
+%ctor { @autoreleasepool { if ([NSBundle.mainBundle.bundleIdentifier isEqualToString:@"com.ss.iphone.ugc.Aweme"]) ACELog(@"START version=1.2.6 native Live Photo pipeline"); } }

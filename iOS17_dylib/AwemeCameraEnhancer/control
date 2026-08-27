@@ -1,8 +1,8 @@
 Package: com.swiftss.awemecameraenhancer
 Name: Aweme Camera Enhancer
-Version: 1.2.5
+Version: 1.2.6
 Architecture: iphoneos-arm
-Description: Defaults Douyin 40.2.0 camera to video, extends recording duration, enables native Live Photo capture, and saves paired Live Photos.
+Description: Defaults Douyin 40.2.0 camera to video, extends recording duration, enables the native Live Photo recording switch, saves a metadata-matched Live Photo pair, and returns through Douyin's native edit flow.
 Maintainer: liqiang
 Author: liqiang
 Section: Tweaks

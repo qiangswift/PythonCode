@@ -71,10 +71,11 @@
 - (id)breadcrumbActionsForActivatingSceneEntity:(id)entity withTransitionContext:(id)context;
 @end
 
-@interface UIStatusBarBreadcrumbItemView : UIView
+@interface UIStatusBarSystemNavigationItemView : UIView
+@property (nonatomic, strong) UIButton *button;
 @end
 
-@interface UIStatusBarSystemNavigationItemView : UIView
+@interface UIStatusBarBreadcrumbItemView : UIStatusBarSystemNavigationItemView
 @end
 
 static BOOL _isEnabled = NO;
@@ -812,16 +813,17 @@ static void svpnDumpSpringBoardStatusRuntimeOnce(void);
 
 %group SingleVPN_AppBreadcrumbDiagnostic
 
-%hook UIStatusBarSystemNavigationItemView
+%hook UIStatusBarBreadcrumbItemView
 
 - (void)layoutSubviews {
     %orig;
     CGFloat offset = _isEnabled ? _breadcrumbVerticalOffset : 0.0;
-    svpnApplyBreadcrumbOffset(self);
+    UIButton *button = self.button;
+    if (button) svpnApplyBreadcrumbOffset(button);
     NSNumber *lastOffset = objc_getAssociatedObject(self, @selector(layoutSubviews));
     if (!lastOffset || fabs(lastOffset.doubleValue - offset) > 0.01) {
         objc_setAssociatedObject(self, @selector(layoutSubviews), @(offset), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-        svpnBreadcrumbLog(@"system navigation layout applied class=%@ frame=%@ offset=%.2f enabled=%d", NSStringFromClass(self.class), NSStringFromCGRect(self.frame), offset, _isEnabled);
+        svpnBreadcrumbLog(@"breadcrumb button offset applied view=%@ buttonFrame=%@ offset=%.2f enabled=%d", NSStringFromClass(self.class), NSStringFromCGRect(button.frame), offset, _isEnabled);
     }
 }
 
@@ -909,12 +911,12 @@ static void svpnDumpSpringBoardStatusRuntimeOnce(void) {
 }
 
 static void svpnInstallAppBreadcrumbDiagnostic(NSUInteger attempt) {
-    Class navigationClass = NSClassFromString(@"UIStatusBarSystemNavigationItemView");
-    if (navigationClass) {
+    Class breadcrumbClass = NSClassFromString(@"UIStatusBarBreadcrumbItemView");
+    if (breadcrumbClass) {
         static dispatch_once_t onceToken;
         dispatch_once(&onceToken, ^{
             %init(SingleVPN_AppBreadcrumbDiagnostic);
-            svpnBreadcrumbLog(@"system navigation hook installed class=%@ offset=%.2f enabled=%d", NSStringFromClass(navigationClass), _breadcrumbVerticalOffset, _isEnabled);
+            svpnBreadcrumbLog(@"breadcrumb button hook installed class=%@ offset=%.2f enabled=%d", NSStringFromClass(breadcrumbClass), _breadcrumbVerticalOffset, _isEnabled);
             svpnDumpBreadcrumbSystemShape();
         });
         return;
@@ -975,7 +977,8 @@ static void svpnInstallBreadcrumbDiagnostic(NSUInteger attempt) {
         return;
     }
 
-    svpnBreadcrumbLog(@"loaded version=2.1-45 bundle=%@ enabled=%d offset=%.2f", bundleIdentifier, _isEnabled, _breadcrumbVerticalOffset);
+    svpnBreadcrumbLog(@"loaded version=2.1-46 bundle=%@ enabled=%d offset=%.2f", bundleIdentifier, _isEnabled, _breadcrumbVerticalOffset);
+    svpnInstallAppBreadcrumbDiagnostic(0);
     svpnInstallBreadcrumbDiagnostic(0);
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         svpnDumpSpringBoardNavigationClasses();

@@ -3,56 +3,8 @@
 #import <objc/message.h>
 #import <math.h>
 
-static BOOL PVAIsShopMallController(UIViewController *controller) {
-    if (!controller) return NO;
-
-    NSString *className = NSStringFromClass(controller.class);
-    NSString *title = controller.tabBarItem.title ?: controller.title;
-    if ([className rangeOfString:@"ShopMall" options:NSCaseInsensitiveSearch].location != NSNotFound ||
-        [title isEqualToString:@"商城"]) {
-        return YES;
-    }
-
-    if ([controller isKindOfClass:UINavigationController.class]) {
-        UINavigationController *navigation = (UINavigationController *)controller;
-        for (UIViewController *child in navigation.viewControllers) {
-            if (PVAIsShopMallController(child)) return YES;
-        }
-    }
-    return NO;
-}
-
-static NSArray *PVAViewControllersWithoutShopMall(NSArray *controllers) {
-    if (![controllers isKindOfClass:NSArray.class] || controllers.count == 0) return controllers;
-    NSMutableArray *filtered = [NSMutableArray arrayWithCapacity:controllers.count];
-    for (id candidate in controllers) {
-        if ([candidate isKindOfClass:UIViewController.class] &&
-            PVAIsShopMallController((UIViewController *)candidate)) {
-            continue;
-        }
-        [filtered addObject:candidate];
-    }
-    return filtered.count == controllers.count ? controllers : filtered.copy;
-}
-
 static BOOL PVAIsShopMallTitle(NSString *title) {
     return [title isKindOfClass:NSString.class] && [title isEqualToString:@"商城"];
-}
-
-static NSString *PVATabNameForType(id controller, NSNumber *type) {
-    SEL selector = NSSelectorFromString(@"getTabbarItemNameWithType:");
-    if (![controller respondsToSelector:selector] || ![type respondsToSelector:@selector(intValue)]) return nil;
-    return ((id (*)(id, SEL, int))objc_msgSend)(controller, selector, type.intValue);
-}
-
-static NSArray *PVATypeArrayWithoutShopMall(id controller, NSArray *types) {
-    if (![types isKindOfClass:NSArray.class]) return types;
-    NSMutableArray *filtered = [NSMutableArray arrayWithCapacity:types.count];
-    for (NSNumber *type in types) {
-        if (PVAIsShopMallTitle(PVATabNameForType(controller, type))) continue;
-        [filtered addObject:type];
-    }
-    return filtered.count == types.count ? types : filtered.copy;
 }
 
 static UILabel *PVAFindShopMallLabel(UIView *view) {

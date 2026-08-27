@@ -5,15 +5,12 @@ Target: Douyin 40.2.0 (`com.ss.iphone.ugc.Aweme`), iOS 15+, rootless jailbreak.
 Features:
 
 - Prefer video instead of photo when entering the camera from `+`.
-- Raise the normal recording ceiling to 24 hours (practically unlimited; storage and system limits still apply).
-- Enable Douyin's native Live Photo first-entry switch through its own feature gate.
-- Save a successfully captured still image to Photos and restore the record button state.
+- Raise the normal recording ceiling to 24 hours (displayed by Douyin as 1440 minutes).
+- Keep Douyin's native Live Photo mode selected and use its native Live Photo capture flow.
+- Save paired image/video resources as a real Live Photo, return to the camera, and show a save-result toast.
 - Write diagnostics to `Documents/AwemeCameraEnhancer.log` in the app container.
-- Add a `相机增强` entry to Douyin's general Settings page. Each feature has an
-  independent switch and all switches default to enabled.
+- Add a `相机增强` entry across Douyin's old and new Settings controllers. Every feature has an independent switch and defaults to enabled.
 
-The log also records the runtime class returned by the native system Live Photo
-callback. This is used to add paired image/video saving without guessing the
-private result object's layout if the app does not save the motion asset itself.
+Version 1.2.0 removes the delayed global experiment-gate scan that could dismiss the first camera entry. A Live Photo is saved only when both the photo and paired-video resource are available; the plugin will not silently downgrade it to a static photo.
 
-The hooks are deliberately limited to camera-domain classes and exact semantic selectors found in Douyin 40.2.0. No global view-controller or camera-framework hooks are used.
+The hooks are limited to camera-domain classes and exact settings controller classes found in Douyin 40.2.0.

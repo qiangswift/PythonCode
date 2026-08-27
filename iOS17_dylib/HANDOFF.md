@@ -70,14 +70,13 @@ PhoenixVideoAdSkip 1.1.1 正在修正“商城”Tab 实际路由到福利页导
 
 ## SingleVPN 当前状态
 
-- 当前开发版本：v2.1-44。
-- 设置首页流量统计改为两个独立的两行标签：左列显示 5G 上下行，右列显示 Wi-Fi 上下行，取消依赖空格补齐的单标签布局。
+- 当前开发版本：v2.1-45。
+- 设置首页流量统计使用 2×2 视觉网格：第一行依次显示 `5G↑`、`WiFi↑`，第二行依次显示 `5G↓`、`WiFi↓`。上下行均使用普通文本箭头，不使用 emoji，并取消依赖空格补齐的单标签布局。
 - 目标：调整 iOS 状态栏“返回 XX”提示的纵向偏移，避免与 NiceBarX 时间信息重叠。
 - 已确认 Dopamine iOS 17 上 breadcrumb provider 会触发，但返回 action 集合为空。
 - App 进程内 Hook `UIStatusBarSystemNavigationItemView` 没有收到布局回调，因此已撤销全 App 注入思路。
 - 返回按钮继续保持 SpringBoard 侧安全诊断；下一步结合设备上的 SpringBoard、StatusStatusUI、StatusBar 和 NiceBarX 二进制确认实际显示项后再应用偏移。
-- v2.1-44 已由新私有仓库 `qiangswift/PythonCode` 的 Actions run `33051988637` 成功编译 rootfull、rootless、roothide。
-- rootless 测试包：`C:\Users\liqiang\Downloads\com.82flex.singlevpn_2.1-44_iphoneos-arm64.deb`。
+- v2.1-45 待由新私有仓库 `qiangswift/PythonCode` 编译 rootfull、rootless、roothide，并自动下载 rootless 测试包。
 
 ## 用户环境与交付偏好
 

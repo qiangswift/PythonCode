@@ -335,7 +335,7 @@ static NSString *svpnTrafficColumn(BOOL wifi) {
     NSString *uploadKey = wifi ? SVPNWifiUploadKey : SVPNCellularUploadKey;
     NSString *downloadKey = wifi ? SVPNWifiDownloadKey : SVPNCellularDownloadKey;
     NSString *name = wifi ? @"WiFi" : @"5G";
-    return [NSString stringWithFormat:@"%@↑：%@\n%@⬇️：%@",
+    return [NSString stringWithFormat:@"%@↑：%@\n%@↓：%@",
         name, svpnCompactTrafficValue([[defaults objectForKey:uploadKey] unsignedLongLongValue]),
         name, svpnCompactTrafficValue([[defaults objectForKey:downloadKey] unsignedLongLongValue])];
 }
@@ -975,7 +975,7 @@ static void svpnInstallBreadcrumbDiagnostic(NSUInteger attempt) {
         return;
     }
 
-    svpnBreadcrumbLog(@"loaded version=2.1-44 bundle=%@ enabled=%d offset=%.2f", bundleIdentifier, _isEnabled, _breadcrumbVerticalOffset);
+    svpnBreadcrumbLog(@"loaded version=2.1-45 bundle=%@ enabled=%d offset=%.2f", bundleIdentifier, _isEnabled, _breadcrumbVerticalOffset);
     svpnInstallBreadcrumbDiagnostic(0);
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         svpnDumpSpringBoardNavigationClasses();

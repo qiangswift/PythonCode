@@ -12,6 +12,9 @@
 @interface ACCVideoEditFlowControlComponent : NSObject
 - (BOOL)backToShootNeedAlert:(BOOL)needAlert;
 @end
+@interface AWEPlayInteractionRightElementContainer : NSObject
+- (UIView *)containerView;
+@end
 
 static const NSTimeInterval kACEMaxRecordDuration = 86400.0;
 static NSString *const kACEVideoDefaultKey = @"ACEVideoDefaultEnabled";
@@ -317,7 +320,8 @@ static void ACEInstallSettingsEntry(UIViewController *controller) {
 }
 - (void)setLayout:(id)layout {
     %orig;
-    dispatch_async(dispatch_get_main_queue(), ^{ ACEApplyRightButtonsOffset([self containerView]); });
+    UIView *view = [self containerView];
+    dispatch_async(dispatch_get_main_queue(), ^{ ACEApplyRightButtonsOffset(view); });
 }
 %end
 

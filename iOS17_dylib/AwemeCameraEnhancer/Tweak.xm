@@ -187,8 +187,16 @@ static void ACEInstallSettingsEntry(UIViewController *controller) {
 %end
 
 %hook ACCRealLivePhotoServiceImpl
-- (void)changeLivePhotoToMode:(unsigned long long)mode { unsigned long long value = ACEEnabled(kACELivePhotoDefaultKey) ? 1 : mode; ACELog(@"LIVE mode %llu -> %llu", mode, value); %orig(value); }
-- (void)changeLivePhotoToMode:(unsigned long long)mode updateBlock:(id)block { unsigned long long value = ACEEnabled(kACELivePhotoDefaultKey) ? 1 : mode; ACELog(@"LIVE mode-block %llu -> %llu", mode, value); %orig(value, block); }
+- (void)changeLivePhotoToMode:(unsigned long long)mode {
+    if (ACEEnabled(kACELivePhotoDefaultKey)) mode = 1;
+    ACELog(@"LIVE selected mode=%llu", mode);
+    %orig;
+}
+- (void)changeLivePhotoToMode:(unsigned long long)mode updateBlock:(id)block {
+    if (ACEEnabled(kACELivePhotoDefaultKey)) mode = 1;
+    ACELog(@"LIVE selected mode-block=%llu", mode);
+    %orig;
+}
 %end
 
 %hook ACCSystemLivePhotoFlowComponent

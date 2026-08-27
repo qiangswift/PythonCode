@@ -138,3 +138,10 @@ PhoenixVideoAdSkip 1.1.1 正在修正“商城”Tab 实际路由到福利页导
 - 删除高频 `status string changed` 诊断日志；命中目标后仍保留精简的偏移日志。
 - 私有仓库提交：`b77ef919`、编译修复 `eb27c863`；GitHub Actions run `33064165215` 的 rootfull、rootless、roothide 均构建成功。
 - rootless 测试包：`C:\Users\liqiang\Downloads\com.82flex.singlevpn_2.1-51_iphoneos-arm64.deb`。
+
+## SingleVPN v2.1-52 流量摘要紧凑对齐
+
+- 取消按屏幕宽度 42%/58% 分割流量两列，改为分别按 `5G` 与 `WiFi` 两列的实际内容宽度布局，固定列间距为 10pt。
+- 两列使用等宽字体并左对齐，使每列上下两行的箭头、冒号和数值起点一致；整个流量组相对“设置”标题向右间隔 24pt。
+- 私有仓库提交：`977b2314`；GitHub Actions run `33064711359` 的 rootfull、rootless、roothide 均构建成功。
+- rootless 测试包：`C:\Users\liqiang\Downloads\com.82flex.singlevpn_2.1-52_iphoneos-arm64.deb`。

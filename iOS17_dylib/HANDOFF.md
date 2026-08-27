@@ -111,6 +111,14 @@ PhoenixVideoAdSkip 1.1.1 正在修正“商城”Tab 实际路由到福利页导
 - 已停用 v2.1-48 高频 STUI 全量诊断，只保留版本载入及目标偏移命中日志。
 - 新私有仓库最终提交：`01075f25`；成功 Actions run：`33062871943`（前一次 run `33062682162` 因残留未初始化诊断组而失败，未生成包）。
 - rootless 测试包：`C:\Users\liqiang\Downloads\com.82flex.singlevpn_2.1-49_iphoneos-arm64.deb`。
+
+## SingleVPN v2.1-50 frame 偏移与流量布局
+
+- 用户测试 v2.1-49 的 transform 偏移视觉上没有生效；StatusStatusUI 后续布局会管理该属性。
+- v2.1-50 改为 Hook 目标 `STUIStatusBarStringView.setFrame:`，对含 `◀` 的 navigation 文本将 Y 偏移合并进系统最终 frame。
+- 设置首页流量两列改为右对齐，列间布局 gap 从 8 缩至 2，左列占比从 44% 调为 42%。
+- 新私有仓库提交：`cb71cd8b`；GitHub Actions run：`33063583926`，三种构建成功。
+- rootless 测试包：`C:\Users\liqiang\Downloads\com.82flex.singlevpn_2.1-50_iphoneos-arm64.deb`。
 - 各项目的 `packages`、`.theos`、deb、IPA、日志和其他构建缓存
 
 处理这些内容前先确认用途，避免污染 Git 历史或公开敏感分析材料。

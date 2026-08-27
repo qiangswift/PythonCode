@@ -1,0 +1,9 @@
+Package: com.liqiang.zhixingupdateblocker
+Name: Zhixing Update Blocker
+Version: 1.4.0
+Architecture: iphoneos-arm
+Description: Blocks update prompts, marketing popups, and splash ads in Zhixing 10.19.2.
+Maintainer: liqiang
+Author: liqiang
+Section: Tweaks
+Depends: mobilesubstrate

@@ -1,0 +1,9 @@
+Package: com.liqiang.chinamobilesplashadblocker
+Name: China Mobile Splash Ad Blocker
+Version: 1.0.0
+Architecture: iphoneos-arm
+Description: Uses China Mobile's native skip path to bypass the splash advertisement.
+Maintainer: liqiang
+Author: liqiang
+Section: Tweaks
+Depends: mobilesubstrate

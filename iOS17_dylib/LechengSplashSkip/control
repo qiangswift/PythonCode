@@ -1,0 +1,9 @@
+Package: com.swiftss.lechengsplashskip
+Name: Lecheng Splash Skip
+Version: 1.0.2
+Architecture: iphoneos-arm
+Description: Skips online and cached splash ads and disables the service banner on the device detail page.
+Maintainer: liqiang
+Author: liqiang
+Section: Tweaks
+Depends: mobilesubstrate

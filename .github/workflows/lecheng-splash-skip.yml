@@ -1,0 +1,53 @@
+name: Build Lecheng Splash Skip
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - "iOS17_dylib/LechengSplashSkip/**"
+      - ".github/workflows/lecheng-splash-skip.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build rootless deb
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential fakeroot git libplist-utils perl rsync xz-utils
+
+      - name: Install Theos, toolchain, and iOS SDK
+        env:
+          THEOS: ${{ runner.temp }}/theos
+        run: |
+          git clone --recursive --depth 1 https://github.com/theos/theos.git "$THEOS"
+          curl -fsSL https://github.com/L1ghtmann/llvm-project/releases/latest/download/iOSToolchain-x86_64.tar.xz \
+            | tar -xJf - -C "$THEOS/toolchain/"
+          git clone --depth 1 https://github.com/theos/sdks.git "${{ runner.temp }}/ios-sdks"
+          cp -a "${{ runner.temp }}/ios-sdks/." "$THEOS/sdks/"
+          test -x "$THEOS/toolchain/linux/iphone/bin/clang"
+
+      - name: Build package
+        working-directory: iOS17_dylib/LechengSplashSkip
+        env:
+          THEOS: ${{ runner.temp }}/theos
+          THEOS_PACKAGE_SCHEME: rootless
+        run: make clean package FINALPACKAGE=1
+
+      - name: Upload deb
+        uses: actions/upload-artifact@v4
+        with:
+          name: LechengSplashSkip-rootless
+          path: iOS17_dylib/LechengSplashSkip/packages/*.deb
+          if-no-files-found: error

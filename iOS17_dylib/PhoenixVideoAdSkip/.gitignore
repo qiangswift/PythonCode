@@ -1,0 +1,6 @@
+.theos/
+packages/
+Payload/
+analysis-tools/
+*.txt
+

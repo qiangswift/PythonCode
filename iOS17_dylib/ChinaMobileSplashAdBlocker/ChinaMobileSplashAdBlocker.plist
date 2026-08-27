@@ -1,0 +1,7 @@
+{
+    Filter = {
+        Bundles = (
+            "cn.10086.app"
+        );
+    };
+}

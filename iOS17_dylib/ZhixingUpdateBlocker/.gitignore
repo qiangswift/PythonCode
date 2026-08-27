@@ -1,0 +1,4 @@
+# Local reverse-engineering extraction; never commit the decrypted application.
+Payload/
+packages/
+.theos/

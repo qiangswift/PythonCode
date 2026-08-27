@@ -1,0 +1,9 @@
+Package: com.swiftss.phoenixvideoadskip
+Name: 红果去广告
+Version: 1.1.0
+Architecture: iphoneos-arm
+Description: Disables episode-transition video ads and removes the Shop tab with automatic four-tab layout.
+Maintainer: liqiang
+Author: liqiang
+Section: Tweaks
+Depends: mobilesubstrate

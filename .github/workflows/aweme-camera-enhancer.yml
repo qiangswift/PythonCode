@@ -1,0 +1,34 @@
+name: Build Aweme Camera Enhancer
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "iOS17_dylib/AwemeCameraEnhancer/**"
+      - ".github/workflows/aweme-camera-enhancer.yml"
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Theos
+        uses: actions/checkout@v4
+        with:
+          repository: theos/theos
+          path: theos
+          submodules: recursive
+      - name: Install dependencies
+        run: brew install ldid xz
+      - name: Build rootless package
+        working-directory: iOS17_dylib/AwemeCameraEnhancer
+        env:
+          THEOS: ${{ github.workspace }}/theos
+          THEOS_PACKAGE_SCHEME: rootless
+        run: make clean package FINALPACKAGE=1
+      - name: Upload deb
+        uses: actions/upload-artifact@v4
+        with:
+          name: AwemeCameraEnhancer-rootless
+          path: iOS17_dylib/AwemeCameraEnhancer/packages/*.deb

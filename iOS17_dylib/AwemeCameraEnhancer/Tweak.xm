@@ -252,6 +252,19 @@ static void ACEInstallSettingsEntry(UIViewController *controller) {
     id result = %orig;
     gACELivePhotoService = result;
     ACELog(@"LIVE service initialized class=%@", NSStringFromClass([result class]));
+    if (ACEEnabled(kACELivePhotoDefaultKey)) {
+        dispatch_async(dispatch_get_main_queue(), ^{
+            ACCRealLivePhotoServiceImpl *service = result;
+            [service changeLivePhotoToMode:1];
+            [service updateLivePhotoBarItem];
+            ACELog(@"LIVE service-init mode and bar refreshed immediately");
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.35 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+                [service changeLivePhotoToMode:1];
+                [service updateLivePhotoBarItem];
+                ACELog(@"LIVE service-init mode and bar refreshed delayed");
+            });
+        });
+    }
     return result;
 }
 - (void)changeLivePhotoToMode:(unsigned long long)mode {
@@ -370,4 +383,4 @@ static void ACEInstallSettingsEntry(UIViewController *controller) {
 %end
 
 
-%ctor { @autoreleasepool { if ([NSBundle.mainBundle.bundleIdentifier isEqualToString:@"com.ss.iphone.ugc.Aweme"]) ACELog(@"START version=1.2.4 native picture flow"); } }
+%ctor { @autoreleasepool { if ([NSBundle.mainBundle.bundleIdentifier isEqualToString:@"com.ss.iphone.ugc.Aweme"]) ACELog(@"START version=1.2.5 service-init Live Photo"); } }

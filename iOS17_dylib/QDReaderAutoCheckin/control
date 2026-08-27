@@ -1,0 +1,9 @@
+Package: com.swiftss.qdreaderautocheckin
+Name: 起点签到去广告
+Version: 1.2.7
+Architecture: iphoneos-arm
+Description: Run the attributed QDReader check-in script and suppress QDReader launch ads.
+Maintainer: swiftss
+Author: swiftss
+Section: Tweaks
+Depends: mobilesubstrate

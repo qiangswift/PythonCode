@@ -130,3 +130,11 @@ PhoenixVideoAdSkip 1.1.1 正在修正“商城”Tab 实际路由到福利页导
 - v2.1-46 改为仅在 SpringBoard 精确 Hook `UIStatusBarBreadcrumbItemView`，将设置的纵向偏移应用于内部按钮 transform，不移动整个状态栏。
 - 新私有仓库提交 `ab5ffe4b`；GitHub Actions run `33060278809` 的 rootfull、rootless、roothide 均构建成功。
 - rootless 测试包：`C:\Users\liqiang\Downloads\com.82flex.singlevpn_2.1-46_iphoneos-arm64.deb`。
+
+## SingleVPN v2.1-51 navigation geometry fallback
+
+- v2.1-50 设备日志中返回文字发生编码混乱，Unicode `◀` 条件没有命中，也没有产生 `navigation offset applied` 记录。
+- v2.1-51 改用已经确认的 `bottomLeading` 几何特征识别 `STUIStatusBarStringView` 返回项，同时保留可用时的 Unicode 判断。
+- 删除高频 `status string changed` 诊断日志；命中目标后仍保留精简的偏移日志。
+- 私有仓库提交：`b77ef919`、编译修复 `eb27c863`；GitHub Actions run `33064165215` 的 rootfull、rootless、roothide 均构建成功。
+- rootless 测试包：`C:\Users\liqiang\Downloads\com.82flex.singlevpn_2.1-51_iphoneos-arm64.deb`。

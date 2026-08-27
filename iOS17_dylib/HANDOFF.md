@@ -145,3 +145,10 @@ PhoenixVideoAdSkip 1.1.1 正在修正“商城”Tab 实际路由到福利页导
 - 两列使用等宽字体并左对齐，使每列上下两行的箭头、冒号和数值起点一致；整个流量组相对“设置”标题向右间隔 24pt。
 - 私有仓库提交：`977b2314`；GitHub Actions run `33064711359` 的 rootfull、rootless、roothide 均构建成功。
 - rootless 测试包：`C:\Users\liqiang\Downloads\com.82flex.singlevpn_2.1-52_iphoneos-arm64.deb`。
+
+## SingleVPN v2.1-53 返回文字向下溢出
+
+- v2.1-51 已确认负偏移可向上移动，但正偏移在状态栏下边界被父级裁剪。
+- v2.1-53 在识别到 `STUIStatusBarStringView` 返回项时，解除该视图到 `STUIStatusBar` 之间父链的 `clipsToBounds` 与 `masksToBounds`，使正值可以继续向下显示。
+- 私有仓库提交：`89df30c5`；GitHub Actions run `33065175626` 首次 Release 遇到 GitHub Unicorn 临时错误，attempt 2 的 rootfull、rootless、roothide 和 Release 均成功。
+- rootless 测试包：`C:\Users\liqiang\Downloads\com.82flex.singlevpn_2.1-53_iphoneos-arm64.deb`。

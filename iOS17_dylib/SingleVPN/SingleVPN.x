@@ -93,6 +93,7 @@ static dispatch_source_t _trafficTimer = nil;
 static dispatch_source_t _settingsOverlayTimer = nil;
 static BOOL _settingsRootVisible = NO;
 static NSHashTable<UIView *> *_breadcrumbViews = nil;
+static const void *SVPNNavigationShiftedFrameKey = &SVPNNavigationShiftedFrameKey;
 
 static void svpnApplyBreadcrumbOffset(UIView *view);
 
@@ -218,7 +219,14 @@ static BOOL svpnIsStatusBarNavigationText(NSString *text) {
 static void svpnApplyStatusBarNavigationOffset(STUIStatusBarStringView *view) {
     if (!view || !svpnIsStatusBarNavigationText(view.text)) return;
     CGFloat offset = _isEnabled ? _breadcrumbVerticalOffset : 0.0;
-    svpnApplyBreadcrumbOffset(view);
+    CGRect frame = view.frame;
+    NSValue *lastShiftedValue = objc_getAssociatedObject(view, SVPNNavigationShiftedFrameKey);
+    if (!lastShiftedValue) {
+        frame.origin.y += offset;
+        objc_setAssociatedObject(view, SVPNNavigationShiftedFrameKey,
+            [NSValue valueWithCGRect:frame], OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        view.frame = frame;
+    }
     NSNumber *lastOffset = objc_getAssociatedObject(view, @selector(svpnApply5GAdvancedAttributesIfNeeded));
     if (!lastOffset || fabs(lastOffset.doubleValue - offset) > 0.01) {
         objc_setAssociatedObject(view, @selector(svpnApply5GAdvancedAttributesIfNeeded), @(offset), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
@@ -489,7 +497,7 @@ static void svpnInstallIndependentSettingsTrafficLabel(void) {
         for (NSNumber *column in @[ @0, @1 ]) {
             UILabel *columnLabel = [[UILabel alloc] initWithFrame:CGRectZero];
             columnLabel.backgroundColor = UIColor.clearColor;
-            columnLabel.textAlignment = NSTextAlignmentLeft;
+            columnLabel.textAlignment = NSTextAlignmentRight;
             columnLabel.textColor = UIColor.secondaryLabelColor;
             columnLabel.font = font;
             columnLabel.numberOfLines = 2;
@@ -517,8 +525,8 @@ static void svpnInstallIndependentSettingsTrafficLabel(void) {
 
     UILabel *leftLabel = objc_getAssociatedObject(trafficView, SVPNTrafficLeftLabelKey);
     UILabel *rightLabel = objc_getAssociatedObject(trafficView, SVPNTrafficRightLabelKey);
-    CGFloat gap = 8.0;
-    CGFloat leftWidth = floor((trafficView.bounds.size.width - gap) * 0.44);
+    CGFloat gap = 2.0;
+    CGFloat leftWidth = floor((trafficView.bounds.size.width - gap) * 0.42);
     leftLabel.frame = CGRectMake(0.0, 0.0, MAX(0.0, leftWidth), trafficView.bounds.size.height);
     rightLabel.frame = CGRectMake(leftWidth + gap, 0.0,
         MAX(0.0, trafficView.bounds.size.width - leftWidth - gap), trafficView.bounds.size.height);
@@ -748,6 +756,21 @@ static void ReloadPrefs() {
 %end
 
 %hook STUIStatusBarStringView
+
+- (void)setFrame:(CGRect)frame {
+    if (svpnIsStatusBarNavigationText(self.text)) {
+        NSValue *lastShiftedValue = objc_getAssociatedObject(self, SVPNNavigationShiftedFrameKey);
+        CGRect lastShiftedFrame = lastShiftedValue ? lastShiftedValue.CGRectValue : CGRectNull;
+        if (!lastShiftedValue || !CGRectEqualToRect(frame, lastShiftedFrame)) {
+            frame.origin.y += _isEnabled ? _breadcrumbVerticalOffset : 0.0;
+        }
+        objc_setAssociatedObject(self, SVPNNavigationShiftedFrameKey,
+            [NSValue valueWithCGRect:frame], OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    } else {
+        objc_setAssociatedObject(self, SVPNNavigationShiftedFrameKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    }
+    %orig(frame);
+}
 
 %new
 - (void)svpnSet5GAdvancedText {
@@ -1071,7 +1094,7 @@ static void svpnInstallBreadcrumbDiagnostic(NSUInteger attempt) {
         return;
     }
 
-    svpnBreadcrumbLog(@"loaded version=2.1-49 bundle=%@ enabled=%d offset=%.2f", bundleIdentifier, _isEnabled, _breadcrumbVerticalOffset);
+    svpnBreadcrumbLog(@"loaded version=2.1-50 bundle=%@ enabled=%d offset=%.2f", bundleIdentifier, _isEnabled, _breadcrumbVerticalOffset);
 
     svpnStartTrafficTimer();
     CFNotificationCenterAddObserver(

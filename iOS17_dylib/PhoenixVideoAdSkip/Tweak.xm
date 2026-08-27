@@ -66,38 +66,57 @@ static UILabel *PVAFindShopMallLabel(UIView *view) {
     return nil;
 }
 
+static UIView *PVADirectChildContainingView(UIView *view, UIView *root) {
+    UIView *candidate = view;
+    while (candidate.superview && candidate.superview != root) candidate = candidate.superview;
+    return candidate.superview == root ? candidate : nil;
+}
+
+static void PVACollectTitleContainers(UIView *view, UIView *root, NSMutableArray<UIView *> *containers) {
+    if ([view isKindOfClass:UILabel.class] && ((UILabel *)view).text.length > 0) {
+        UIView *container = PVADirectChildContainingView(view, root);
+        if (container && ![containers containsObject:container]) [containers addObject:container];
+    }
+    for (UIView *child in view.subviews) PVACollectTitleContainers(child, root, containers);
+}
+
 static void PVACleanupVisibleShopMallTab(UITabBarController *tabController) {
-    NSArray<UIViewController *> *controllers = tabController.viewControllers;
-    if (controllers.count <= 4) return;
-
-    NSInteger shopIndex = NSNotFound;
-    NSArray<UITabBarItem *> *items = tabController.tabBar.items;
-    NSUInteger comparableCount = MIN(items.count, controllers.count);
-    for (NSUInteger index = 0; index < comparableCount; index++) {
-        if (PVAIsShopMallTitle(items[index].title)) {
-            shopIndex = (NSInteger)index;
-            break;
-        }
+    UIView *root = nil;
+    SEL visibleSelector = NSSelectorFromString(@"topVisibleTabBar");
+    if ([tabController respondsToSelector:visibleSelector]) {
+        root = ((id (*)(id, SEL))objc_msgSend)(tabController, visibleSelector);
     }
+    if (![root isKindOfClass:UIView.class]) root = tabController.tabBar;
 
-    if (shopIndex == NSNotFound) {
-        UILabel *label = PVAFindShopMallLabel(tabController.tabBar);
-        if (label && tabController.tabBar.bounds.size.width > 0) {
-            CGPoint center = [label.superview convertPoint:label.center toView:tabController.tabBar];
-            CGFloat segmentWidth = tabController.tabBar.bounds.size.width / controllers.count;
-            shopIndex = MIN((NSInteger)controllers.count - 1, MAX(0, (NSInteger)floor(center.x / segmentWidth)));
-        }
-    }
+    UILabel *shopLabel = PVAFindShopMallLabel(root);
+    UIView *shopContainer = PVADirectChildContainingView(shopLabel, root);
+    if (!shopContainer || root.bounds.size.width <= 0) return;
 
-    if (shopIndex == NSNotFound || shopIndex >= (NSInteger)controllers.count) return;
-    NSMutableArray *remaining = controllers.mutableCopy;
-    [remaining removeObjectAtIndex:(NSUInteger)shopIndex];
-    [tabController setViewControllers:remaining animated:NO];
-    if (tabController.selectedIndex >= remaining.count) tabController.selectedIndex = 0;
+    NSMutableArray<UIView *> *allContainers = [NSMutableArray array];
+    PVACollectTitleContainers(root, root, allContainers);
+    CGFloat shopMidY = CGRectGetMidY(shopContainer.frame);
+    NSPredicate *sameRow = [NSPredicate predicateWithBlock:^BOOL(UIView *candidate, NSDictionary *bindings) {
+        return fabs(CGRectGetMidY(candidate.frame) - shopMidY) < 24.0 && candidate.bounds.size.width > 20.0;
+    }];
+    NSMutableArray<UIView *> *row = [[allContainers filteredArrayUsingPredicate:sameRow] mutableCopy];
+    [row sortUsingComparator:^NSComparisonResult(UIView *left, UIView *right) {
+        CGFloat leftX = CGRectGetMinX(left.frame), rightX = CGRectGetMinX(right.frame);
+        return leftX < rightX ? NSOrderedAscending : (leftX > rightX ? NSOrderedDescending : NSOrderedSame);
+    }];
+    if (row.count < 5 || ![row containsObject:shopContainer]) return;
 
-    SEL resetSelector = NSSelectorFromString(@"resetTabBarRatio");
-    if ([tabController respondsToSelector:resetSelector]) {
-        ((void (*)(id, SEL))objc_msgSend)(tabController, resetSelector);
+    shopContainer.hidden = YES;
+    shopContainer.userInteractionEnabled = NO;
+    [row removeObject:shopContainer];
+    CGFloat width = root.bounds.size.width / row.count;
+    for (NSUInteger index = 0; index < row.count; index++) {
+        UIView *button = row[index];
+        button.hidden = NO;
+        button.userInteractionEnabled = YES;
+        CGRect frame = button.frame;
+        frame.origin.x = width * index;
+        frame.size.width = width;
+        button.frame = frame;
     }
 }
 
@@ -117,32 +136,24 @@ static void PVACleanupVisibleShopMallTab(UITabBarController *tabController) {
 %hook SSTabBarController
 
 - (NSArray *)typeArray {
-    NSArray *original = %orig;
-    return PVATypeArrayWithoutShopMall(self, original);
+    return %orig;
 }
 
 - (BOOL)isTabBarItemVisible:(int)itemType {
-    if (PVAIsShopMallTitle(PVATabNameForType(self, @(itemType)))) return NO;
     return %orig;
 }
 
 - (NSArray *)tabBarVCs {
-    NSArray *original = %orig;
-    return PVAViewControllersWithoutShopMall(original);
+    return %orig;
 }
 
 - (void)setViewControllers:(NSArray<__kindof UIViewController *> *)viewControllers animated:(BOOL)animated {
-    %orig(PVAViewControllersWithoutShopMall(viewControllers), animated);
+    %orig;
 }
 
 - (void)viewDidAppear:(BOOL)animated {
     %orig;
     UITabBarController *tabController = (UITabBarController *)self;
-    NSArray *filtered = PVAViewControllersWithoutShopMall(tabController.viewControllers);
-    if (filtered.count != tabController.viewControllers.count) {
-        [tabController setViewControllers:filtered animated:NO];
-        if (tabController.selectedIndex >= filtered.count) tabController.selectedIndex = 0;
-    }
     dispatch_async(dispatch_get_main_queue(), ^{
         PVACleanupVisibleShopMallTab(tabController);
     });

@@ -12,8 +12,25 @@
 @interface ACCVideoEditFlowControlComponent : NSObject
 - (BOOL)backToShootNeedAlert:(BOOL)needAlert;
 @end
-@interface AWEPlayInteractionRightElementContainer : NSObject
-- (UIView *)containerView;
+@interface AWESettingItemModel : NSObject
+@property(nonatomic, copy) NSString *identifier;
+@property(nonatomic, copy) NSString *title;
+@property(nonatomic, copy) NSString *detail;
+@property(nonatomic) NSInteger type;
+@property(nonatomic, copy) NSString *svgIconImageName;
+@property(nonatomic) NSInteger cellType;
+@property(nonatomic) NSInteger colorStyle;
+@property(nonatomic) BOOL isEnable;
+@property(nonatomic, copy) void (^cellTappedBlock)(void);
+@end
+@interface AWESettingSectionModel : NSObject
+@property(nonatomic, copy) NSArray *itemArray;
+@property(nonatomic) NSInteger type;
+@property(nonatomic) CGFloat sectionHeaderHeight;
+@property(nonatomic, copy) NSString *sectionHeaderTitle;
+@end
+@interface AWESettingsViewModel : NSObject
+@property(nonatomic, weak) UIViewController *controllerDelegate;
 @end
 
 static const NSTimeInterval kACEMaxRecordDuration = 86400.0;
@@ -52,9 +69,24 @@ static NSHashTable<UIView *> *ACERightButtonViews(void) {
 static void ACEApplyRightButtonsOffset(UIView *view) {
     if (!view) return;
     [ACERightButtonViews() addObject:view];
-    CGAffineTransform transform = view.transform;
-    transform.ty = -ACERightButtonsOffset();
-    view.transform = transform;
+    view.transform = CGAffineTransformMakeTranslation(0, -ACERightButtonsOffset());
+}
+
+static UIViewController *ACEViewControllerForView(UIView *view) {
+    UIResponder *responder = view;
+    while (responder) {
+        responder = responder.nextResponder;
+        if ([responder isKindOfClass:UIViewController.class]) return (UIViewController *)responder;
+    }
+    return nil;
+}
+
+static BOOL ACEViewContainsClass(UIView *view, Class targetClass) {
+    if (!targetClass) return NO;
+    for (UIView *subview in view.subviews) {
+        if ([subview isKindOfClass:targetClass] || ACEViewContainsClass(subview, targetClass)) return YES;
+    }
+    return NO;
 }
 
 static void ACERefreshRightButtonsOffset(void) {
@@ -262,34 +294,6 @@ static void ACEWaitForNativeLiveSources(id owner, NSUInteger attempt) {
 }
 @end
 
-static void ACEInstallSettingsEntry(UIViewController *controller) {
-    NSMutableArray *items = [NSMutableArray arrayWithArray:controller.navigationItem.rightBarButtonItems ?: @[]];
-    for (UIBarButtonItem *item in items) if ([item.title isEqualToString:@"相机增强"]) return;
-    ACEPreferencesEntryTarget.shared.presenter = controller;
-    [items addObject:[[UIBarButtonItem alloc] initWithTitle:@"相机增强" style:UIBarButtonItemStylePlain target:ACEPreferencesEntryTarget.shared action:@selector(open)]];
-    controller.navigationItem.rightBarButtonItems = items; ACELog(@"SETTINGS installed class=%@", NSStringFromClass(controller.class));
-
-    const NSInteger buttonTag = 0xACE1201;
-    if (![controller.view viewWithTag:buttonTag]) {
-        UIButton *button = [UIButton buttonWithType:UIButtonTypeSystem];
-        button.tag = buttonTag;
-        button.translatesAutoresizingMaskIntoConstraints = NO;
-        button.backgroundColor = [UIColor colorWithRed:0.12 green:0.12 blue:0.14 alpha:0.92];
-        button.layer.cornerRadius = 20;
-        [button setTitle:@"相机增强" forState:UIControlStateNormal];
-        [button setTitleColor:UIColor.whiteColor forState:UIControlStateNormal];
-        button.titleLabel.font = [UIFont systemFontOfSize:15 weight:UIFontWeightSemibold];
-        [button addTarget:ACEPreferencesEntryTarget.shared action:@selector(open) forControlEvents:UIControlEventTouchUpInside];
-        [controller.view addSubview:button];
-        [NSLayoutConstraint activateConstraints:@[
-            [button.trailingAnchor constraintEqualToAnchor:controller.view.safeAreaLayoutGuide.trailingAnchor constant:-16],
-            [button.bottomAnchor constraintEqualToAnchor:controller.view.safeAreaLayoutGuide.bottomAnchor constant:-20],
-            [button.widthAnchor constraintEqualToConstant:112], [button.heightAnchor constraintEqualToConstant:40]
-        ]];
-        ACELog(@"SETTINGS visible button installed");
-    }
-}
-
 %hook AWERecordModeHelperImpl
 - (BOOL)isDefaultToPhotoModeForFirstLanding {
     ACELog(@"MODE first original-query forceVideo=%d", ACEEnabled(kACEVideoDefaultKey));
@@ -312,16 +316,29 @@ static void ACEInstallSettingsEntry(UIViewController *controller) {
 }
 %end
 
-%hook AWEPlayInteractionRightElementContainer
-- (UIView *)containerView {
-    UIView *view = %orig;
-    ACEApplyRightButtonsOffset(view);
-    return view;
-}
-- (void)setLayout:(id)layout {
+%hook UIStackView
+- (void)layoutSubviews {
     %orig;
-    UIView *view = [self containerView];
-    dispatch_async(dispatch_get_main_queue(), ^{ ACEApplyRightButtonsOffset(view); });
+    UIViewController *controller = ACEViewControllerForView(self);
+    Class interactionClass = NSClassFromString(@"AWEPlayInteractionViewController");
+    if (!interactionClass || ![controller isKindOfClass:interactionClass]) return;
+
+    BOOL isRightStack = [self.accessibilityLabel isEqualToString:@"right"];
+    if (!isRightStack) {
+        isRightStack = ACEViewContainsClass(self, NSClassFromString(@"AWEPlayInteractionUserAvatarView"));
+    }
+    if (!isRightStack) {
+        SEL elementNameSelector = NSSelectorFromString(@"elementClassName");
+        for (UIView *subview in [self.subviews copy]) {
+            if (![subview respondsToSelector:elementNameSelector]) continue;
+            NSString *elementName = ((id (*)(id, SEL))objc_msgSend)(subview, elementNameSelector);
+            if ([elementName isEqualToString:@"AWEPlayInteractionUserAvatarOptElementElement"]) {
+                isRightStack = YES;
+                break;
+            }
+        }
+    }
+    if (isRightStack) ACEApplyRightButtonsOffset(self);
 }
 %end
 
@@ -385,34 +402,43 @@ static void ACEInstallSettingsEntry(UIViewController *controller) {
 }
 %end
 
-%hook AWEGeneralSettingViewController
-- (void)viewDidAppear:(BOOL)animated {
-    %orig;
-    ACEInstallSettingsEntry((UIViewController *)self);
-}
-%end
-%hook AWESettingsTableViewController
-- (void)viewDidAppear:(BOOL)animated {
-    %orig;
-    ACEInstallSettingsEntry((UIViewController *)self);
-}
-%end
-%hook AWESettingPageBaseController
-- (void)viewDidAppear:(BOOL)animated {
-    %orig;
-    ACEInstallSettingsEntry((UIViewController *)self);
-}
-%end
-%hook AWESettingBaseViewController
-- (void)viewDidAppear:(BOOL)animated {
-    %orig;
-    ACEInstallSettingsEntry((UIViewController *)self);
-}
-%end
-%hook _TtC7FlowKit24AppSettingViewController
-- (void)viewDidAppear:(BOOL)animated {
-    %orig;
-    ACEInstallSettingsEntry((UIViewController *)self);
+%hook AWESettingsViewModel
+- (NSArray *)sectionDataArray {
+    NSArray *original = %orig;
+    BOOL isMainSettings = NO;
+    for (AWESettingSectionModel *section in original) {
+        if ([section.sectionHeaderTitle isEqualToString:@"账号"]) isMainSettings = YES;
+        if ([section.sectionHeaderTitle isEqualToString:@"相机增强"]) return original;
+        for (AWESettingItemModel *item in section.itemArray) {
+            if ([item.identifier isEqualToString:@"com.swiftss.awemecameraenhancer.settings"]) return original;
+        }
+    }
+    if (!isMainSettings) return original;
+
+    AWESettingItemModel *item = [NSClassFromString(@"AWESettingItemModel") new];
+    AWESettingSectionModel *section = [NSClassFromString(@"AWESettingSectionModel") new];
+    if (!item || !section) return original;
+    item.identifier = @"com.swiftss.awemecameraenhancer.settings";
+    item.title = @"相机增强";
+    item.detail = @"1.3.2";
+    item.type = 0;
+    item.svgIconImageName = @"ic_sapling_outlined";
+    item.cellType = 26;
+    item.colorStyle = 2;
+    item.isEnable = YES;
+    __weak AWESettingsViewModel *weakSelf = self;
+    item.cellTappedBlock = ^{
+        UIViewController *presenter = weakSelf.controllerDelegate ?: ACETopController();
+        ACEPreferencesEntryTarget.shared.presenter = presenter;
+        [ACEPreferencesEntryTarget.shared open];
+    };
+    section.itemArray = @[item];
+    section.type = 0;
+    section.sectionHeaderHeight = 40;
+    section.sectionHeaderTitle = @"相机增强";
+    NSMutableArray *result = [original mutableCopy] ?: [NSMutableArray array];
+    [result insertObject:section atIndex:0];
+    return result;
 }
 %end
 

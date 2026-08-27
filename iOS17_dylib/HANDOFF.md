@@ -160,3 +160,11 @@ PhoenixVideoAdSkip 1.1.1 正在修正“商城”Tab 实际路由到福利页导
 - 流量摘要每组拆为固定前缀标签和独立右对齐数值标签，使不同位数的 `xx.xxG` 以末尾 `G` 对齐。
 - 私有仓库提交：`77f8f5e8`；GitHub Actions run `33065989085` 的 rootfull、rootless、roothide 均构建成功。
 - rootless 测试包：`C:\Users\liqiang\Downloads\com.82flex.singlevpn_2.1-54_iphoneos-arm64.deb`。
+
+## SingleVPN v2.1-56 图层位移与 WiFi 垂线锚定
+
+- v2.1-54 的 `bounds.origin` 测试在 `+8` 时仍无视觉变化；v2.1-55 改用 CALayer translation，但因未链接 QuartzCore 而构建失败，未交付测试。
+- v2.1-56 链接 QuartzCore，并在每次目标布局后应用 `CATransform3DMakeTranslation(0, offset, 0)`；日志关键字改为 `navigation layer offset applied`。
+- 设置页流量摘要的最右侧锚定到屏幕宽度 80.5%（iPhone 15 Pro 状态栏 WiFi 图标中心垂线），内容长度变化时向左扩展。
+- 私有仓库提交：`a4dc0638`；GitHub Actions run `33066569437` 的 rootfull、rootless、roothide 均构建成功。
+- rootless 测试包：`C:\Users\liqiang\Downloads\com.82flex.singlevpn_2.1-56_iphoneos-arm64.deb`。

@@ -178,8 +178,14 @@ static void ACEInstallSettingsEntry(UIViewController *controller) {
 }
 
 %hook AWERecordModeHelperImpl
-- (BOOL)isDefaultToPhotoModeForFirstLanding { return ACEEnabled(kACEVideoDefaultKey) ? NO : %orig; }
-- (BOOL)isDefaultToPhotoModeForEveryLanding { return ACEEnabled(kACEVideoDefaultKey) ? NO : %orig; }
+- (BOOL)isDefaultToPhotoModeForFirstLanding {
+    if (ACEEnabled(kACEVideoDefaultKey)) return NO;
+    return %orig;
+}
+- (BOOL)isDefaultToPhotoModeForEveryLanding {
+    if (ACEEnabled(kACEVideoDefaultKey)) return NO;
+    return %orig;
+}
 %end
 
 %hook ACCRecordConfigServiceImpl
@@ -200,7 +206,14 @@ static void ACEInstallSettingsEntry(UIViewController *controller) {
 %end
 
 %hook ACCSystemLivePhotoFlowComponent
-- (void)tryTakePicture { if (ACEEnabled(kACELivePhotoDefaultKey)) { ACELog(@"LIVE force native capture"); [self takeLivePhotoPicture]; } else %orig; }
+- (void)tryTakePicture {
+    if (ACEEnabled(kACELivePhotoDefaultKey)) {
+        ACELog(@"LIVE force native capture");
+        [self takeLivePhotoPicture];
+        return;
+    }
+    %orig;
+}
 %end
 
 %hook ACCRecordFlowComponent

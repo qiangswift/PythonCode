@@ -1,6 +1,7 @@
 #import <Foundation/Foundation.h>
 #import <UIKit/UIKit.h>
 #import <Photos/Photos.h>
+#import <objc/runtime.h>
 
 @interface ACCRecordFlowComponent : NSObject
 - (void)restoreRecordButtonState;
@@ -17,6 +18,7 @@ static NSString *const kACEUnlimitedDurationKey = @"ACEUnlimitedDurationEnabled"
 static NSString *const kACELivePhotoDefaultKey = @"ACELivePhotoDefaultEnabled";
 static NSString *const kACEPhotoSaveKey = @"ACEPhotoAutoSaveEnabled";
 static __weak UIViewController *gACECameraController;
+static NSUInteger gACECameraEntryCount = 0;
 
 static BOOL ACEEnabled(NSString *key) {
     NSUserDefaults *defaults = NSUserDefaults.standardUserDefaults;
@@ -49,6 +51,50 @@ static UIViewController *ACETopController(void) {
         else break;
     }
     return controller;
+}
+
+static BOOL ACEClassOwnsSelector(Class cls, SEL selector) {
+    unsigned int count = 0;
+    Method *methods = class_copyMethodList(cls, &count);
+    BOOL found = NO;
+    for (unsigned int index = 0; index < count; index++) {
+        if (method_getName(methods[index]) == selector) { found = YES; break; }
+    }
+    free(methods);
+    return found;
+}
+
+static void ACEDumpCameraRuntime(void) {
+    NSArray<NSString *> *names = @[@"changeLivePhotoToMode:", @"changeLivePhotoToMode:updateBlock:",
+        @"tryTakePicture", @"takeLivePhotoPicture", @"flowServiceDidSystemLivePhotoWithPicture:",
+        @"onCaptureStillImageWithImage:error:", @"systemLivePhotoOpened", @"recordSystemLivePhotoInnerSwitch:"];
+    int count = objc_getClassList(NULL, 0);
+    if (count <= 0) return;
+    Class *classes = (__unsafe_unretained Class *)calloc((size_t)count, sizeof(Class));
+    count = objc_getClassList(classes, count);
+    for (NSString *name in names) {
+        SEL selector = NSSelectorFromString(name);
+        NSMutableArray *owners = [NSMutableArray array];
+        for (int index = 0; index < count; index++) {
+            Class cls = classes[index];
+            if (ACEClassOwnsSelector(cls, selector)) [owners addObject:NSStringFromClass(cls)];
+        }
+        ACELog(@"INVENTORY selector=%@ owners=%@", name, owners);
+    }
+    free(classes);
+}
+
+static void ACETraceCameraEntry(NSString *source) {
+    NSUInteger entry = ++gACECameraEntryCount;
+    ACELog(@"ENTRY #%lu source=%@ top-now=%@", (unsigned long)entry, source, NSStringFromClass(ACETopController().class));
+    if (entry == 1) ACEDumpCameraRuntime();
+    for (NSNumber *delay in @[@0.25, @0.75, @1.5, @3.0]) {
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(delay.doubleValue * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            UIViewController *top = ACETopController();
+            ACELog(@"ENTRY #%lu after=%.2f top=%@ presented=%d", (unsigned long)entry, delay.doubleValue,
+                   NSStringFromClass(top.class), top.presentingViewController != nil);
+        });
+    }
 }
 
 static void ACEShowToast(UIViewController *controller, NSString *text) {
@@ -175,14 +221,37 @@ static void ACEInstallSettingsEntry(UIViewController *controller) {
     ACEPreferencesEntryTarget.shared.presenter = controller;
     [items addObject:[[UIBarButtonItem alloc] initWithTitle:@"相机增强" style:UIBarButtonItemStylePlain target:ACEPreferencesEntryTarget.shared action:@selector(open)]];
     controller.navigationItem.rightBarButtonItems = items; ACELog(@"SETTINGS installed class=%@", NSStringFromClass(controller.class));
+
+    const NSInteger buttonTag = 0xACE1201;
+    if (![controller.view viewWithTag:buttonTag]) {
+        UIButton *button = [UIButton buttonWithType:UIButtonTypeSystem];
+        button.tag = buttonTag;
+        button.translatesAutoresizingMaskIntoConstraints = NO;
+        button.backgroundColor = [UIColor colorWithRed:0.12 green:0.12 blue:0.14 alpha:0.92];
+        button.layer.cornerRadius = 20;
+        [button setTitle:@"相机增强" forState:UIControlStateNormal];
+        [button setTitleColor:UIColor.whiteColor forState:UIControlStateNormal];
+        button.titleLabel.font = [UIFont systemFontOfSize:15 weight:UIFontWeightSemibold];
+        [button addTarget:ACEPreferencesEntryTarget.shared action:@selector(open) forControlEvents:UIControlEventTouchUpInside];
+        [controller.view addSubview:button];
+        [NSLayoutConstraint activateConstraints:@[
+            [button.trailingAnchor constraintEqualToAnchor:controller.view.safeAreaLayoutGuide.trailingAnchor constant:-16],
+            [button.bottomAnchor constraintEqualToAnchor:controller.view.safeAreaLayoutGuide.bottomAnchor constant:-20],
+            [button.widthAnchor constraintEqualToConstant:112], [button.heightAnchor constraintEqualToConstant:40]
+        ]];
+        ACELog(@"SETTINGS visible button installed");
+    }
 }
 
 %hook AWERecordModeHelperImpl
 - (BOOL)isDefaultToPhotoModeForFirstLanding {
+    ACELog(@"MODE first original-query forceVideo=%d", ACEEnabled(kACEVideoDefaultKey));
+    ACETraceCameraEntry(@"first-landing");
     if (ACEEnabled(kACEVideoDefaultKey)) return NO;
     return %orig;
 }
 - (BOOL)isDefaultToPhotoModeForEveryLanding {
+    ACELog(@"MODE every original-query forceVideo=%d", ACEEnabled(kACEVideoDefaultKey));
     if (ACEEnabled(kACEVideoDefaultKey)) return NO;
     return %orig;
 }
@@ -266,4 +335,4 @@ static void ACEInstallSettingsEntry(UIViewController *controller) {
 }
 %end
 
-%ctor { @autoreleasepool { if ([NSBundle.mainBundle.bundleIdentifier isEqualToString:@"com.ss.iphone.ugc.Aweme"]) ACELog(@"START version=1.2.0"); } }
+%ctor { @autoreleasepool { if ([NSBundle.mainBundle.bundleIdentifier isEqualToString:@"com.ss.iphone.ugc.Aweme"]) ACELog(@"START version=1.2.1 diagnostics"); } }

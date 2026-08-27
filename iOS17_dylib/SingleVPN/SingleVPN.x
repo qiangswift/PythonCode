@@ -185,8 +185,9 @@ static void svpnLogTopStatusViews(UIView *view, UIWindow *window, NSUInteger dep
     if (nearTop && !view.hidden && view.alpha > 0.01) {
         NSString *className = NSStringFromClass(view.class);
         NSString *text = [view isKindOfClass:UILabel.class] ? ((UILabel *)view).text : nil;
+        if (!text.length && [view isKindOfClass:UIButton.class]) text = ((UIButton *)view).currentTitle;
         NSString *identifier = view.accessibilityIdentifier;
-        if ([className.lowercaseString containsString:@"status"] || text.length || identifier.length) {
+        if ([className.lowercaseString containsString:@"status"] || [className hasPrefix:@"NBX"] || text.length || identifier.length) {
             svpnBreadcrumbLog(@"view depth=%lu class=%@ frame=%@ text=%@ identifier=%@", (unsigned long)depth, className, NSStringFromCGRect(frame), text ?: @"", identifier ?: @"");
             if ([className hasPrefix:@"STUIStatusBar"] || [className containsString:@"Navigation"] || [className containsString:@"Breadcrumb"]) {
                 svpnLogObjectIvars(view);
@@ -196,13 +197,21 @@ static void svpnLogTopStatusViews(UIView *view, UIWindow *window, NSUInteger dep
     for (UIView *subview in view.subviews) svpnLogTopStatusViews(subview, window, depth + 1);
 }
 
-static void svpnCaptureBreadcrumbViewHierarchy(void) {
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.35 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+static void svpnCaptureBreadcrumbViewHierarchyAfterDelay(NSTimeInterval delay, NSUInteger pass) {
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(delay * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        svpnBreadcrumbLog(@"breadcrumb view scan pass=%lu delay=%.2f", (unsigned long)pass, delay);
         for (UIWindow *window in UIApplication.sharedApplication.windows) {
             svpnLogTopStatusViews(window, window, 0);
         }
-        svpnBreadcrumbLog(@"view scan complete");
+        svpnBreadcrumbLog(@"breadcrumb view scan complete pass=%lu", (unsigned long)pass);
     });
+}
+
+static void svpnCaptureBreadcrumbViewHierarchy(void) {
+    const NSTimeInterval delays[] = { 0.2, 0.8, 1.5, 3.0, 5.0 };
+    for (NSUInteger index = 0; index < sizeof(delays) / sizeof(delays[0]); index++) {
+        svpnCaptureBreadcrumbViewHierarchyAfterDelay(delays[index], index + 1);
+    }
 }
 
 static NSUserDefaults *svpnDefaults(void) {
@@ -977,7 +986,7 @@ static void svpnInstallBreadcrumbDiagnostic(NSUInteger attempt) {
         return;
     }
 
-    svpnBreadcrumbLog(@"loaded version=2.1-46 bundle=%@ enabled=%d offset=%.2f", bundleIdentifier, _isEnabled, _breadcrumbVerticalOffset);
+    svpnBreadcrumbLog(@"loaded version=2.1-47 bundle=%@ enabled=%d offset=%.2f", bundleIdentifier, _isEnabled, _breadcrumbVerticalOffset);
     svpnInstallAppBreadcrumbDiagnostic(0);
     svpnInstallBreadcrumbDiagnostic(0);
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{

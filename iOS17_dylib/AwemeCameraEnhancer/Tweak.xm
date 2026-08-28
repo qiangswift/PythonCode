@@ -134,6 +134,15 @@ static BOOL ACEViewBelongsToProfileDetailVideo(UIView *view) {
     return NO;
 }
 
+static CGFloat ACEProfileCommentContentCompensation(UIView *view) {
+    id configuredHeight = [NSUserDefaults.standardUserDefaults objectForKey:@"DYYYTabBarHeight"];
+    CGFloat targetHeight = [configuredHeight respondsToSelector:@selector(doubleValue)] ? [configuredHeight doubleValue] : 0;
+    if (targetHeight <= 0 || !ACEViewBelongsToProfileDetailVideo(view)) return 0;
+    CGFloat safeAreaBottom = view.window ? view.window.safeAreaInsets.bottom : 0;
+    CGFloat downwardOffset = MAX(0, 49.0 + safeAreaBottom - targetHeight);
+    return MIN(downwardOffset, safeAreaBottom + 8.0);
+}
+
 static void ACEApplyDYYYProfileCommentBarHeight(UIView *view) {
     id configuredHeight = [NSUserDefaults.standardUserDefaults objectForKey:@"DYYYTabBarHeight"];
     CGFloat targetHeight = [configuredHeight respondsToSelector:@selector(doubleValue)] ? [configuredHeight doubleValue] : 0;
@@ -147,7 +156,7 @@ static void ACEApplyDYYYProfileCommentBarHeight(UIView *view) {
     // The Swift container owns both the black background and the controls.
     // Keep the shortened background position, but compensate its content for
     // the home-indicator safe area so labels and action icons remain visible.
-    CGFloat contentCompensation = MIN(downwardOffset, safeAreaBottom);
+    CGFloat contentCompensation = ACEProfileCommentContentCompensation(view);
     for (UIView *subview in [view.subviews copy]) {
         NSValue *storedTransform = objc_getAssociatedObject(subview, &kACECommentSubviewBaseTransformKey);
         CGAffineTransform baseTransform = storedTransform ? storedTransform.CGAffineTransformValue : subview.transform;
@@ -385,6 +394,15 @@ static void ACEWaitForNativeLiveSources(id owner, NSUInteger attempt) {
     %orig;
     ACEApplyDYYYProfileCommentBarHeight(self);
 }
+- (BOOL)pointInside:(CGPoint)point withEvent:(UIEvent *)event {
+    if (%orig(point, event)) return YES;
+    CGFloat compensation = ACEProfileCommentContentCompensation(self);
+    if (compensation <= 0) return NO;
+    CGRect interactiveBounds = self.bounds;
+    interactiveBounds.origin.y -= compensation;
+    interactiveBounds.size.height += compensation;
+    return CGRectContainsPoint(interactiveBounds, point);
+}
 %end
 %end
 
@@ -512,7 +530,7 @@ static void ACEWaitForNativeLiveSources(id owner, NSUInteger attempt) {
     if (!item || !section) return original;
     item.identifier = @"com.swiftss.awemecameraenhancer.settings";
     item.title = @"相机增强";
-    item.detail = @"1.3.6";
+    item.detail = @"1.3.7";
     item.type = 0;
     item.svgIconImageName = @"ic_sapling_outlined";
     item.cellType = 26;

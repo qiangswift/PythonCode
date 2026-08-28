@@ -143,6 +143,14 @@ static CGFloat ACEProfileCommentContentCompensation(UIView *view) {
     return MIN(downwardOffset, safeAreaBottom + 8.0);
 }
 
+static void ACECollectSubviewsOfClass(UIView *root, Class targetClass, NSMutableArray<UIView *> *result) {
+    if (!targetClass) return;
+    for (UIView *subview in [root.subviews copy]) {
+        if ([subview isKindOfClass:targetClass]) [result addObject:subview];
+        ACECollectSubviewsOfClass(subview, targetClass, result);
+    }
+}
+
 static void ACEApplyDYYYProfileCommentBarHeight(UIView *view) {
     id configuredHeight = [NSUserDefaults.standardUserDefaults objectForKey:@"DYYYTabBarHeight"];
     CGFloat targetHeight = [configuredHeight respondsToSelector:@selector(doubleValue)] ? [configuredHeight doubleValue] : 0;
@@ -157,7 +165,10 @@ static void ACEApplyDYYYProfileCommentBarHeight(UIView *view) {
     // Keep the shortened background position, but compensate its content for
     // the home-indicator safe area so labels and action icons remain visible.
     CGFloat contentCompensation = ACEProfileCommentContentCompensation(view);
-    for (UIView *subview in [view.subviews copy]) {
+    Class middleContainerClass = NSClassFromString(@"AWECommentInputViewSwiftImpl.CommentInputViewMiddleContainer");
+    NSMutableArray<UIView *> *contentContainers = [NSMutableArray array];
+    ACECollectSubviewsOfClass(view, middleContainerClass, contentContainers);
+    for (UIView *subview in contentContainers) {
         NSValue *storedTransform = objc_getAssociatedObject(subview, &kACECommentSubviewBaseTransformKey);
         CGAffineTransform baseTransform = storedTransform ? storedTransform.CGAffineTransformValue : subview.transform;
         if (!storedTransform) {
@@ -531,7 +542,7 @@ static void ACEWaitForNativeLiveSources(id owner, NSUInteger attempt) {
     if (!item || !section) return original;
     item.identifier = @"com.swiftss.awemecameraenhancer.settings";
     item.title = @"相机增强";
-    item.detail = @"1.3.7";
+    item.detail = @"1.3.8";
     item.type = 0;
     item.svgIconImageName = @"ic_sapling_outlined";
     item.cellType = 26;

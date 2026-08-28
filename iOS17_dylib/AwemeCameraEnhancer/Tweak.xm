@@ -33,6 +33,8 @@
 @interface AWESettingsViewModel : NSObject
 @property(nonatomic, weak) UIViewController *controllerDelegate;
 @end
+@interface ACECommentInputContainerView : UIView
+@end
 
 static const NSTimeInterval kACEMaxRecordDuration = 86400.0;
 static NSString *const kACEVideoDefaultKey = @"ACEVideoDefaultEnabled";
@@ -111,6 +113,35 @@ static BOOL ACEViewContainsClass(UIView *view, Class targetClass) {
         if ([subview isKindOfClass:targetClass] || ACEViewContainsClass(subview, targetClass)) return YES;
     }
     return NO;
+}
+
+static BOOL ACEViewBelongsToProfileDetailVideo(UIView *view) {
+    Class tableClass = NSClassFromString(@"AWEAwemeDetailTableViewController");
+    Class cellClass = NSClassFromString(@"AWEAwemeDetailCellViewController");
+    UIResponder *responder = view;
+    while ((responder = responder.nextResponder)) {
+        if ((tableClass && [responder isKindOfClass:tableClass]) ||
+            (cellClass && [responder isKindOfClass:cellClass])) return YES;
+        if ([responder isKindOfClass:UIViewController.class]) {
+            UIViewController *controller = (UIViewController *)responder;
+            for (UIViewController *parent = controller.parentViewController; parent; parent = parent.parentViewController) {
+                if ((tableClass && [parent isKindOfClass:tableClass]) ||
+                    (cellClass && [parent isKindOfClass:cellClass])) return YES;
+            }
+        }
+    }
+    return NO;
+}
+
+static void ACEApplyDYYYProfileCommentBarHeight(UIView *view) {
+    id configuredHeight = [NSUserDefaults.standardUserDefaults objectForKey:@"DYYYTabBarHeight"];
+    CGFloat targetHeight = [configuredHeight respondsToSelector:@selector(doubleValue)] ? [configuredHeight doubleValue] : 0;
+    if (targetHeight <= 0 || !ACEViewBelongsToProfileDetailVideo(view)) return;
+
+    CGFloat safeAreaBottom = view.window ? view.window.safeAreaInsets.bottom : 0;
+    CGFloat originalHeight = 49.0 + safeAreaBottom;
+    CGFloat downwardOffset = MAX(0, originalHeight - targetHeight);
+    view.transform = CGAffineTransformMakeTranslation(0, downwardOffset);
 }
 
 static void ACERefreshRightButtonsOffset(void) {
@@ -332,6 +363,15 @@ static void ACEWaitForNativeLiveSources(id owner, NSUInteger attempt) {
 }
 %end
 
+%group ACEProfileCommentBarGroup
+%hook ACECommentInputContainerView
+- (void)layoutSubviews {
+    %orig;
+    ACEApplyDYYYProfileCommentBarHeight(self);
+}
+%end
+%end
+
 %hook ACCRecordConfigServiceImpl
 - (double)videoMaxDuration {
     double original = %orig;
@@ -456,7 +496,7 @@ static void ACEWaitForNativeLiveSources(id owner, NSUInteger attempt) {
     if (!item || !section) return original;
     item.identifier = @"com.swiftss.awemecameraenhancer.settings";
     item.title = @"相机增强";
-    item.detail = @"1.3.4";
+    item.detail = @"1.3.5";
     item.type = 0;
     item.svgIconImageName = @"ic_sapling_outlined";
     item.cellType = 26;
@@ -479,4 +519,7 @@ static void ACEWaitForNativeLiveSources(id owner, NSUInteger attempt) {
 %end
 
 
-%ctor { }
+%ctor {
+    Class commentInputClass = objc_getClass("AWECommentInputViewSwiftImpl.CommentInputContainerView");
+    if (commentInputClass) %init(ACEProfileCommentBarGroup, ACECommentInputContainerView = commentInputClass);
+}

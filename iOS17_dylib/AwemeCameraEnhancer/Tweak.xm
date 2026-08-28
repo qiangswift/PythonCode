@@ -51,6 +51,7 @@ static BOOL gACELiveSaveSucceeded = NO;
 static BOOL gACELiveSaveInProgress = NO;
 static char kACERightStackRegisteredKey;
 static char kACEApplyingTransformKey;
+static char kACECommentSubviewBaseTransformKey;
 
 static BOOL ACEEnabled(NSString *key) {
     NSUserDefaults *defaults = NSUserDefaults.standardUserDefaults;
@@ -142,6 +143,21 @@ static void ACEApplyDYYYProfileCommentBarHeight(UIView *view) {
     CGFloat originalHeight = 49.0 + safeAreaBottom;
     CGFloat downwardOffset = MAX(0, originalHeight - targetHeight);
     view.transform = CGAffineTransformMakeTranslation(0, downwardOffset);
+
+    // The Swift container owns both the black background and the controls.
+    // Keep the shortened background position, but compensate its content for
+    // the home-indicator safe area so labels and action icons remain visible.
+    CGFloat contentCompensation = MIN(downwardOffset, safeAreaBottom);
+    for (UIView *subview in [view.subviews copy]) {
+        NSValue *storedTransform = objc_getAssociatedObject(subview, &kACECommentSubviewBaseTransformKey);
+        CGAffineTransform baseTransform = storedTransform ? storedTransform.CGAffineTransformValue : subview.transform;
+        if (!storedTransform) {
+            objc_setAssociatedObject(subview, &kACECommentSubviewBaseTransformKey,
+                                     [NSValue valueWithCGAffineTransform:baseTransform],
+                                     OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        }
+        subview.transform = CGAffineTransformTranslate(baseTransform, 0, -contentCompensation);
+    }
 }
 
 static void ACERefreshRightButtonsOffset(void) {
@@ -496,7 +512,7 @@ static void ACEWaitForNativeLiveSources(id owner, NSUInteger attempt) {
     if (!item || !section) return original;
     item.identifier = @"com.swiftss.awemecameraenhancer.settings";
     item.title = @"相机增强";
-    item.detail = @"1.3.5";
+    item.detail = @"1.3.6";
     item.type = 0;
     item.svgIconImageName = @"ic_sapling_outlined";
     item.cellType = 26;

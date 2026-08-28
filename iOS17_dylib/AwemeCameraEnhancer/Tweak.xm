@@ -520,6 +520,7 @@ static void ACEWaitForNativeLiveSources(id owner, NSUInteger attempt) {
 
 
 %ctor {
+    %init;
     Class commentInputClass = objc_getClass("AWECommentInputViewSwiftImpl.CommentInputContainerView");
     if (commentInputClass) %init(ACEProfileCommentBarGroup, ACECommentInputContainerView = commentInputClass);
 }

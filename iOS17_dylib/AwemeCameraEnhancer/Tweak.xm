@@ -395,7 +395,7 @@ static void ACEWaitForNativeLiveSources(id owner, NSUInteger attempt) {
     ACEApplyDYYYProfileCommentBarHeight(self);
 }
 - (BOOL)pointInside:(CGPoint)point withEvent:(UIEvent *)event {
-    if (%orig(point, event)) return YES;
+    if (%orig) return YES;
     CGFloat compensation = ACEProfileCommentContentCompensation(self);
     if (compensation <= 0) return NO;
     CGRect interactiveBounds = self.bounds;

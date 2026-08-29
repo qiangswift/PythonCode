@@ -32,3 +32,29 @@ jobs:
         with:
           name: AwemeCameraEnhancer-rootless
           path: iOS17_dylib/AwemeCameraEnhancer/packages/*.deb
+
+  build-roothide:
+    name: Build RootHide deb
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install RootHide Theos
+        uses: actions/checkout@v4
+        with:
+          repository: roothide/theos
+          path: theos-roothide
+          submodules: recursive
+      - name: Install dependencies
+        run: brew install ldid xz
+      - name: Build RootHide package
+        working-directory: iOS17_dylib/AwemeCameraEnhancer
+        env:
+          THEOS: ${{ github.workspace }}/theos-roothide
+          THEOS_PACKAGE_SCHEME: roothide
+        run: make clean package FINALPACKAGE=1
+      - name: Upload RootHide deb
+        uses: actions/upload-artifact@v4
+        with:
+          name: AwemeCameraEnhancer-roothide
+          path: iOS17_dylib/AwemeCameraEnhancer/packages/*.deb
+          if-no-files-found: error

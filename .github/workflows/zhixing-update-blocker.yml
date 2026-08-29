@@ -52,3 +52,28 @@ jobs:
           name: ZhixingUpdateBlocker-rootless
           path: iOS17_dylib/ZhixingUpdateBlocker/packages/*.deb
           if-no-files-found: error
+
+  build-roothide:
+    name: Build RootHide deb
+    runs-on: macos-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install RootHide Theos
+        uses: actions/checkout@v4
+        with:
+          repository: roothide/theos
+          path: theos-roothide
+          submodules: recursive
+      - run: brew install ldid xz
+      - name: Build RootHide package
+        working-directory: iOS17_dylib/ZhixingUpdateBlocker
+        env:
+          THEOS: ${{ github.workspace }}/theos-roothide
+          THEOS_PACKAGE_SCHEME: roothide
+        run: make clean package FINALPACKAGE=1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ZhixingUpdateBlocker-roothide
+          path: iOS17_dylib/ZhixingUpdateBlocker/packages/*.deb
+          if-no-files-found: error

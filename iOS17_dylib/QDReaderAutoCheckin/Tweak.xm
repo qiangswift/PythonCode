@@ -92,6 +92,9 @@ static void QDRScheduleSplashSkip(NSUInteger attempt) {
 @property(nonatomic, copy) NSString *pendingNotice;
 @property(nonatomic, strong) JSContext *activeContext;
 @property(nonatomic) BOOL runFailed;
+@property(nonatomic) NSUInteger runFetchStarted;
+@property(nonatomic) NSUInteger runFetchFinished;
+@property(nonatomic) NSUInteger runHTTPSuccessCount;
 + (instancetype)shared;
 - (void)captureRequest:(NSURLRequest *)request;
 - (void)startForWelfareEntry;
@@ -116,7 +119,11 @@ static void QDRScheduleSplashSkip(NSUInteger attempt) {
     Dl_info info = {0};
     if (dladdr((const void *)&QDRTargetBundle, &info) && info.dli_fname) {
         NSString *dylib = [NSString stringWithUTF8String:info.dli_fname];
-        NSString *library = [[dylib stringByDeletingLastPathComponent] stringByDeletingLastPathComponent];
+        // Follow the dylib into Relaxin/RootHide's randomized .jbroot and walk
+        // back from Library/MobileSubstrate/DynamicLibraries to Library.
+        NSString *library = [[[dylib stringByDeletingLastPathComponent]
+                              stringByDeletingLastPathComponent]
+                             stringByDeletingLastPathComponent];
         NSString *candidate = [library stringByAppendingPathComponent:@"Application Support/QDReaderAutoCheckin/qdreader.js"];
         if ([[NSFileManager defaultManager] fileExistsAtPath:candidate]) return candidate;
     }
@@ -244,17 +251,36 @@ static void QDRScheduleSplashSkip(NSUInteger attempt) {
     }
     self.running = YES;
     self.runFailed = NO;
+    self.runFetchStarted = 0;
+    self.runFetchFinished = 0;
+    self.runHTTPSuccessCount = 0;
     QDRLog(@"script run started; script=%@", [self scriptPath] ?: @"<missing>");
     self.pendingNotice = nil;
     [self evaluateWithRequest:nil completion:^{
         self.running = NO;
-        BOOL failureText = [self.pendingNotice containsString:@"失败"] || [self.pendingNotice containsString:@"异常"];
-        if (!self.runFailed && !failureText) {
+        BOOL failureText = [self.pendingNotice containsString:@"失败"] || [self.pendingNotice containsString:@"异常"] ||
+                           [self.pendingNotice containsString:@"错误"] || [self.pendingNotice containsString:@"未完成"];
+        BOOL requestsComplete = self.runFetchStarted > 0 && self.runFetchFinished == self.runFetchStarted;
+        BOOL verified = !self.runFailed && !failureText && requestsComplete && self.runHTTPSuccessCount > 0;
+        if (verified) {
             [[self store] setObject:[self todayKey] forKey:QDRLastCompletedKey];
             [[self store] synchronize];
-            QDRLog(@"script run finished; daily completion recorded");
-        } else QDRLog(@"script run finished with failure; daily completion not recorded");
-        NSString *message = self.pendingNotice.length ? self.pendingNotice : @"签到脚本已执行完毕";
+            QDRLog(@"script run verified; requests=%lu success=%lu; daily completion recorded",
+                   (unsigned long)self.runFetchStarted, (unsigned long)self.runHTTPSuccessCount);
+        } else {
+            QDRLog(@"script run unverified failed=%d requests=%lu finished=%lu success=%lu notice=%@",
+                   self.runFailed, (unsigned long)self.runFetchStarted,
+                   (unsigned long)self.runFetchFinished, (unsigned long)self.runHTTPSuccessCount,
+                   self.pendingNotice ?: @"<none>");
+        }
+        NSString *message = self.pendingNotice;
+        if (!message.length) {
+            if (self.runFailed) message = @"签到脚本未成功执行，请导出日志排查。";
+            else if (self.runFetchStarted == 0) message = @"脚本已结束，但未发起任何签到请求，本次不计为成功。";
+            else if (!requestsComplete) message = @"脚本在网络请求完成前提前结束，本次不计为成功。";
+            else if (self.runHTTPSuccessCount == 0) message = @"签到请求均未获得成功响应，请稍后重试。";
+            else message = @"脚本未返回可验证的执行结果，本次不计为成功。";
+        }
         [self presentCompletion:message];
     }];
 }
@@ -292,8 +318,15 @@ static void QDRScheduleSplashSkip(NSUInteger attempt) {
 
 - (void)evaluateWithRequest:(NSDictionary *)requestObject completion:(dispatch_block_t)completion {
     NSError *error = nil;
-    NSString *source = [NSString stringWithContentsOfFile:[self scriptPath] encoding:NSUTF8StringEncoding error:&error];
-    if (source.length == 0) { self.runFailed = YES; QDRLog(@"script load failed path=%@ error=%@", [self scriptPath], error); if (completion) completion(); return; }
+    NSString *resolvedScriptPath = [self scriptPath];
+    NSString *source = resolvedScriptPath.length ? [NSString stringWithContentsOfFile:resolvedScriptPath encoding:NSUTF8StringEncoding error:&error] : nil;
+    if (source.length == 0) {
+        self.runFailed = YES;
+        self.pendingNotice = @"签到脚本文件未找到或读取失败，请重新安装 RootHide 版插件。";
+        QDRLog(@"script load failed path=%@ error=%@", resolvedScriptPath ?: @"<missing>", error);
+        if (completion) completion();
+        return;
+    }
 
     JSContext *context = [JSContext new];
     self.activeContext = context;
@@ -349,7 +382,13 @@ static void QDRScheduleSplashSkip(NSUInteger attempt) {
         NSDictionary *options = [parsed isKindOfClass:NSDictionary.class] ? parsed : @{};
         NSString *urlString = [parsed isKindOfClass:NSString.class] ? parsed : options[@"url"];
         NSURL *url = QDRCreateURL(urlString ?: @"", nil);
-        if (!url) return;
+        if (!url) {
+            weakSelf.runFailed = YES;
+            weakSelf.pendingNotice = @"脚本生成了无效的签到请求地址。";
+            QDRLog(@"request rejected: invalid URL");
+            return;
+        }
+        if (!requestObject) weakSelf.runFetchStarted += 1;
         NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:url];
         request.HTTPMethod = options[@"method"] ?: @"GET";
         request.timeoutInterval = 30;
@@ -366,6 +405,10 @@ static void QDRScheduleSplashSkip(NSUInteger attempt) {
                     statusCode = http.statusCode;
                     result[@"statusCode"] = @(http.statusCode);
                     result[@"headers"] = http.allHeaderFields ?: @{};
+                }
+                if (!requestObject) {
+                    weakSelf.runFetchFinished += 1;
+                    if (!networkError && statusCode >= 200 && statusCode < 300) weakSelf.runHTTPSuccessCount += 1;
                 }
                 result[@"body"] = bodyData ? [[NSString alloc] initWithData:bodyData encoding:NSUTF8StringEncoding] ?: @"" : @"";
                 result[@"error"] = networkError.localizedDescription ?: @"";
@@ -540,7 +583,7 @@ static void QDRObserveTask(NSURLSessionTask *task) {
 %ctor {
     NSString *bundle = NSBundle.mainBundle.bundleIdentifier;
     if ([bundle isEqualToString:QDRTargetBundle] || [bundle isEqualToString:QDREnterpriseBundle]) {
-        QDRLog(@"loaded version=1.2.6 bundle=%@", bundle);
+        QDRLog(@"loaded version=1.2.8 bundle=%@", bundle);
         %init;
     }
 }

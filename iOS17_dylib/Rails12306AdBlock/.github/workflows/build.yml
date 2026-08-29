@@ -1,0 +1,39 @@
+name: Build packages
+permissions:
+  contents: write
+on:
+  workflow_dispatch:
+  push:
+    tags: ['v*']
+jobs:
+  build:
+    runs-on: macos-15
+    strategy:
+      fail-fast: false
+      matrix:
+        scheme: [rootfull, rootless, roothide]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install dependencies
+        run: brew install ldid make xz
+      - name: Install Theos
+        run: |
+          git clone --recursive https://github.com/roothide/theos.git "$HOME/theos"
+          curl -fsSL https://github.com/theos/sdks/archive/master.tar.gz | tar -xz --strip-components=1 -C "$HOME/theos/sdks"
+      - name: Build
+        run: |
+          export THEOS="$HOME/theos"
+          if [ "${{ matrix.scheme }}" = rootfull ]; then
+            make clean package FINALPACKAGE=1
+          else
+            make clean package FINALPACKAGE=1 THEOS_PACKAGE_SCHEME="${{ matrix.scheme }}"
+          fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Rails12306AdBlock-${{ matrix.scheme }}
+          path: packages/*.deb
+      - name: Upload release assets
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: packages/*.deb

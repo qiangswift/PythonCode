@@ -1,0 +1,9 @@
+Package: com.swiftss.rails12306adblock
+Name: 12306 Ad Block
+Version: 1.1.7
+Architecture: iphoneos-arm
+Description: Scoped ad filtering with a static native home banner.
+Maintainer: swiftss
+Author: swiftss
+Section: Tweaks
+Depends: mobilesubstrate

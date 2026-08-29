@@ -1,0 +1,29 @@
+name: Build Rails 12306 Ad Block RootHide
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ["iOS17_dylib/Rails12306AdBlock/**", ".github/workflows/rails-12306-ad-block-roothide.yml"]
+permissions:
+  contents: read
+jobs:
+  build-roothide:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: roothide/theos
+          path: theos-roothide
+          submodules: recursive
+      - run: brew install ldid xz
+      - working-directory: iOS17_dylib/Rails12306AdBlock
+        env:
+          THEOS: ${{ github.workspace }}/theos-roothide
+          THEOS_PACKAGE_SCHEME: roothide
+        run: make clean package FINALPACKAGE=1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Rails12306AdBlock-roothide
+          path: iOS17_dylib/Rails12306AdBlock/packages/*.deb
+          if-no-files-found: error

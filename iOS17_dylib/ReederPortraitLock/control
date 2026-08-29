@@ -1,0 +1,9 @@
+Package: com.swiftss.reederportraitlock
+Name: Reeder Portrait Lock
+Version: 1.0.1
+Architecture: iphoneos-arm
+Description: Locks Reeder 5 to portrait without injecting SpringBoard.
+Maintainer: swiftss
+Author: swiftss
+Section: Tweaks
+Depends: mobilesubstrate

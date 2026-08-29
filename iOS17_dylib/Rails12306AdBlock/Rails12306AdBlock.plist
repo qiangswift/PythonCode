@@ -1,0 +1,5 @@
+{
+    Filter = {
+        Bundles = ("cn.12306.rails12306");
+    };
+}

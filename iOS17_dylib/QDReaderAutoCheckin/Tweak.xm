@@ -8,7 +8,9 @@
 static NSString *const QDRTargetBundle = @"m.qidian.QDReaderAppStore";
 static NSString *const QDREnterpriseBundle = @"m.qidian.QDReaderQiYe";
 static NSString *const QDRPrefsSuite = @"com.swiftss.qdreaderautocheckin.runtime";
-static NSString *const QDRLastCompletedKey = @"lastCompletedDate";
+// Do not trust the legacy completion key: versions through 1.2.7 wrote it
+// when JavaScript merely called $done(), even if no task request was made.
+static NSString *const QDRLastCompletedKey = @"verifiedLastCompletedDateV2";
 
 static NSString *QDRLogPath(void) {
     NSString *documents = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES).firstObject;
@@ -273,14 +275,13 @@ static void QDRScheduleSplashSkip(NSUInteger attempt) {
                    (unsigned long)self.runFetchFinished, (unsigned long)self.runHTTPSuccessCount,
                    self.pendingNotice ?: @"<none>");
         }
-        NSString *message = self.pendingNotice;
-        if (!message.length) {
-            if (self.runFailed) message = @"签到脚本未成功执行，请导出日志排查。";
-            else if (self.runFetchStarted == 0) message = @"脚本已结束，但未发起任何签到请求，本次不计为成功。";
-            else if (!requestsComplete) message = @"脚本在网络请求完成前提前结束，本次不计为成功。";
-            else if (self.runHTTPSuccessCount == 0) message = @"签到请求均未获得成功响应，请稍后重试。";
-            else message = @"脚本未返回可验证的执行结果，本次不计为成功。";
-        }
+        NSString *message = nil;
+        if (verified) message = self.pendingNotice.length ? self.pendingNotice : @"签到任务已完成并通过请求校验。";
+        else if (self.runFailed) message = self.pendingNotice.length ? self.pendingNotice : @"签到脚本未成功执行，请导出日志排查。";
+        else if (self.runFetchStarted == 0) message = @"脚本已结束，但未发起任何签到请求，本次不计为成功。";
+        else if (!requestsComplete) message = @"脚本在网络请求完成前提前结束，本次不计为成功。";
+        else if (self.runHTTPSuccessCount == 0) message = @"签到请求均未获得成功响应，请稍后重试。";
+        else message = @"脚本未返回可验证的执行结果，本次不计为成功。";
         [self presentCompletion:message];
     }];
 }
@@ -583,7 +584,7 @@ static void QDRObserveTask(NSURLSessionTask *task) {
 %ctor {
     NSString *bundle = NSBundle.mainBundle.bundleIdentifier;
     if ([bundle isEqualToString:QDRTargetBundle] || [bundle isEqualToString:QDREnterpriseBundle]) {
-        QDRLog(@"loaded version=1.2.8 bundle=%@", bundle);
+        QDRLog(@"loaded version=1.2.9 bundle=%@", bundle);
         %init;
     }
 }

@@ -21,6 +21,15 @@ static void QDRLog(NSString *format, ...);
 @interface QDRShelfTopAdView : UIView
 @end
 
+@interface QDRShelfNavigationInfoView : UIView
+@end
+
+@interface QDRShelfNavView : UIView
+@end
+
+@interface QDRShelfViewController : UIViewController
+@end
+
 
 static void QDRCollapseShelfPromotionView(UIView *view) {
     if (!view) return;
@@ -702,22 +711,75 @@ static void QDRObserveTask(NSURLSessionTask *task) {
 }
 %end
 
+%hook QDRShelfNavigationInfoView
+- (void)setFrame:(CGRect)frame {
+    frame.size.height = 0.0;
+    %orig(frame);
+    QDRCollapseShelfPromotionView(self);
+}
+- (void)setBounds:(CGRect)bounds {
+    bounds.size.height = 0.0;
+    %orig(bounds);
+}
+- (CGSize)intrinsicContentSize {
+    return CGSizeMake(UIViewNoIntrinsicMetric, 0.0);
+}
+- (CGSize)sizeThatFits:(CGSize)size {
+    return CGSizeMake(size.width, 0.0);
+}
+- (void)didMoveToSuperview {
+    %orig;
+    QDRCollapseShelfPromotionView(self);
+}
+%end
+
+%hook QDRShelfNavView
+- (BOOL)isTopAdBannerShowing {
+    return NO;
+}
+%end
+
+%hook QDRShelfViewController
+- (id)topAdView {
+    return nil;
+}
+- (void)setTopAdView:(id)view {
+    %orig(nil);
+}
+- (BOOL)isBgOpen {
+    return NO;
+}
+- (void)setIsBgOpen:(BOOL)open {
+    %orig(NO);
+}
+- (BOOL)hasTopAdShowed {
+    return YES;
+}
+%end
+
 %end
 
 %ctor {
     NSString *bundle = NSBundle.mainBundle.bundleIdentifier;
     if ([bundle isEqualToString:QDRTargetBundle] || [bundle isEqualToString:QDREnterpriseBundle]) {
-        QDRLog(@"loaded version=1.3.2 bundle=%@", bundle);
+        QDRLog(@"loaded version=1.3.3 bundle=%@", bundle);
         %init;
         Class advertiseView = objc_getClass("_TtC16QDReaderAppStore27QDBookShelfTopAdvertiseView");
         Class topAdView = objc_getClass("_TtC16QDReaderAppStore20QDBookShelfTopAdView");
-        if (advertiseView && topAdView) {
+        Class infoView = objc_getClass("_TtC16QDReaderAppStore29QDBookShelfNavigationInfoView");
+        Class navView = objc_getClass("_TtC16QDReaderAppStore18QDBookShelfNavView");
+        Class shelfVC = objc_getClass("_TtC16QDReaderAppStore25QDBookShelfViewController");
+        if (advertiseView && topAdView && infoView && navView && shelfVC) {
             %init(QDRShelfPromotionHooks,
                   QDRShelfTopAdvertiseView = advertiseView,
-                  QDRShelfTopAdView = topAdView);
+                  QDRShelfTopAdView = topAdView,
+                  QDRShelfNavigationInfoView = infoView,
+                  QDRShelfNavView = navView,
+                  QDRShelfViewController = shelfVC);
         } else {
-            QDRLog(@"bookshelf promotion hook unavailable advertise=%d topAd=%d",
-                   advertiseView != Nil, topAdView != Nil);
+            QDRLog(@"bookshelf promotion hook unavailable advertise=%d topAd=%d info=%d nav=%d vc=%d",
+                   advertiseView != Nil, topAdView != Nil, infoView != Nil,
+                   navView != Nil, shelfVC != Nil);
         }
     }
 }

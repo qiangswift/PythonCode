@@ -12,12 +12,10 @@ static NSString *const QDRPrefsSuite = @"com.swiftss.qdreaderautocheckin.runtime
 // Do not trust the legacy completion key: versions through 1.2.7 wrote it
 // when JavaScript merely called $done(), even if no task request was made.
 static NSString *const QDRLastCompletedKey = @"verifiedLastCompletedDateV2";
-static const void *QDRShelfNativeFoldKey = &QDRShelfNativeFoldKey;
 
 @interface QDRShelfViewController : UIViewController
 @end
 
-extern "C" void QDRInvokeSwiftVoidClosure(void *function, void *context);
 
 static NSString *QDRLogPath(void) {
     NSString *documents = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES).firstObject;
@@ -628,53 +626,48 @@ static BOOL QDRReadSwiftBoolIvar(id object, const char *name, BOOL *value, ptrdi
     return YES;
 }
 
-static ptrdiff_t QDRIvarOffsetContaining(id object, NSString *fragment) {
+static id QDRObjectIvarContaining(id object, NSString *fragment, ptrdiff_t *resolvedOffset) {
     unsigned int count = 0;
     Ivar *ivars = class_copyIvarList(object_getClass(object), &count);
-    ptrdiff_t offset = -1;
+    id value = nil;
     for (unsigned int index = 0; index < count; index++) {
         NSString *name = [NSString stringWithUTF8String:ivar_getName(ivars[index]) ?: ""];
         if ([name containsString:fragment]) {
-            offset = ivar_getOffset(ivars[index]);
+            if (resolvedOffset) *resolvedOffset = ivar_getOffset(ivars[index]);
+            value = object_getIvar(object, ivars[index]);
             break;
         }
     }
     free(ivars);
-    return offset;
+    return value;
 }
 
-static void QDRInvokeNativeShelfFold(id controller, id topAdView, NSUInteger attempt) {
+static void QDRCollapseShelfThroughNavState(id controller, NSUInteger attempt) {
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.25 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        if (!controller || !topAdView || ![(UIViewController *)controller viewIfLoaded].window) return;
-        BOOL expanded = NO;
-        ptrdiff_t stateOffset = -1;
-        if (!QDRReadSwiftBoolIvar(controller, "isBgOpen", &expanded, &stateOffset)) {
-            QDRLog(@"bookshelf native fold unavailable: isBgOpen ivar missing");
-            return;
-        }
-        if (!expanded) {
-            QDRLog(@"bookshelf native fold already collapsed stateOffset=0x%tx", stateOffset);
-            return;
-        }
-        ptrdiff_t handlerOffset = QDRIvarOffsetContaining(topAdView, @"foldAdBannerHandler");
-        if (handlerOffset >= 0) {
-            uintptr_t *closure = (uintptr_t *)((uint8_t *)(__bridge void *)topAdView + handlerOffset);
-            void *function = (void *)closure[0];
-            void *context = (void *)closure[1];
-            if (!function) {
-                if (attempt < 20) QDRInvokeNativeShelfFold(controller, topAdView, attempt + 1);
-                else QDRLog(@"bookshelf native fold unresolved handler=nil offset=0x%tx", handlerOffset);
-                return;
+        if (!controller || ![(UIViewController *)controller viewIfLoaded].window) return;
+        ptrdiff_t navOffset = -1;
+        id navView = QDRObjectIvarContaining(controller, @"navigationView", &navOffset);
+        BOOL bannerShowing = NO;
+        BOOL arrowDown = NO;
+        ptrdiff_t showingOffset = -1;
+        ptrdiff_t arrowOffset = -1;
+        BOOL hasShowing = navView && QDRReadSwiftBoolIvar(navView, "isTopAdBannerShowing", &bannerShowing, &showingOffset);
+        BOOL hasArrow = navView && QDRReadSwiftBoolIvar(navView, "arrowIsDown", &arrowDown, &arrowOffset);
+        if (hasShowing && hasArrow && bannerShowing) {
+            if (!arrowDown && [navView respondsToSelector:@selector(headerTapped)]) {
+                ((void (*)(id, SEL))objc_msgSend)(navView, @selector(headerTapped));
+                QDRLog(@"bookshelf native header collapse invoked nav=0x%tx showing=0x%tx arrow=0x%tx",
+                       navOffset, showingOffset, arrowOffset);
+            } else {
+                QDRLog(@"bookshelf header already collapsed banner=%d arrowDown=%d",
+                       bannerShowing, arrowDown);
             }
-            if (!objc_getAssociatedObject(topAdView, QDRShelfNativeFoldKey)) {
-                objc_setAssociatedObject(topAdView, QDRShelfNativeFoldKey, @YES,
-                                         OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-                QDRInvokeSwiftVoidClosure(function, context);
-                QDRLog(@"bookshelf native Swift fold handler invoked stateOffset=0x%tx handlerOffset=0x%tx",
-                       stateOffset, handlerOffset);
-            }
+        } else if (attempt < 40) {
+            QDRCollapseShelfThroughNavState(controller, attempt + 1);
         } else {
-            QDRLog(@"bookshelf native fold unresolved handler ivar missing");
+            QDRLog(@"bookshelf nav state unresolved nav=%@ hasShowing=%d banner=%d hasArrow=%d arrowDown=%d",
+                   navView ? NSStringFromClass([navView class]) : @"<missing>",
+                   hasShowing, bannerShowing, hasArrow, arrowDown);
         }
     });
 }
@@ -685,13 +678,11 @@ static void QDRInvokeNativeShelfFold(id controller, id topAdView, NSUInteger att
 %hook QDRShelfViewController
 - (void)viewDidAppear:(BOOL)animated {
     %orig;
-    id topAdView = [self respondsToSelector:@selector(topAdView)]
-        ? ((id (*)(id, SEL))objc_msgSend)(self, @selector(topAdView)) : nil;
-    QDRInvokeNativeShelfFold(self, topAdView, 0);
+    QDRCollapseShelfThroughNavState(self, 0);
 }
-- (void)setTopAdView:(id)view {
-    %orig(view);
-    QDRInvokeNativeShelfFold(self, view, 0);
+- (void)enterForeground {
+    %orig;
+    QDRCollapseShelfThroughNavState(self, 0);
 }
 %end
 
@@ -700,7 +691,7 @@ static void QDRInvokeNativeShelfFold(id controller, id topAdView, NSUInteger att
 %ctor {
     NSString *bundle = NSBundle.mainBundle.bundleIdentifier;
     if ([bundle isEqualToString:QDRTargetBundle] || [bundle isEqualToString:QDREnterpriseBundle]) {
-        QDRLog(@"loaded version=1.4.2 bundle=%@", bundle);
+        QDRLog(@"loaded version=1.4.3 bundle=%@", bundle);
         %init;
         Class shelfVC = objc_getClass("_TtC16QDReaderAppStore25QDBookShelfViewController");
         if (shelfVC) {

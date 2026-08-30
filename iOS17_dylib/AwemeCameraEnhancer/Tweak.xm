@@ -44,6 +44,7 @@ static NSString *const kACEPhotoSaveKey = @"ACEPhotoAutoSaveEnabled";
 static NSString *const kACERightButtonsOffsetKey = @"ACERightButtonsVerticalOffset";
 static NSString *const kACEDescriptionReflowKey = @"ACEDescriptionReflowEnabled";
 static NSString *const kACEDescriptionScaleKey = @"ACEDescriptionFontScale";
+static NSString *const kACEDescriptionWeightKey = @"ACEDescriptionFontWeightBoost";
 static __weak UIViewController *gACECameraController;
 static __weak ACCRecordSystemLivePhotoServiceImpl *gACESystemLivePhotoService;
 static __weak ACCVideoEditFlowControlComponent *gACEEditFlowControl;
@@ -79,9 +80,21 @@ static CGFloat ACEDescriptionScale(void) {
     return MIN(1.0, MAX(0.3, scale));
 }
 
+static CGFloat ACEDescriptionWeightBoost(void) {
+    id value = [NSUserDefaults.standardUserDefaults objectForKey:kACEDescriptionWeightKey];
+    CGFloat boost = [value respondsToSelector:@selector(doubleValue)] ? [value doubleValue] : 0.5;
+    return MIN(1.0, MAX(0.0, boost));
+}
+
 static UIFont *ACEScaledFont(UIFont *font, CGFloat scale) {
     if (!font) return nil;
-    return [UIFont fontWithDescriptor:font.fontDescriptor size:MAX(6.0, font.pointSize * scale)];
+    UIFontDescriptor *descriptor = font.fontDescriptor;
+    NSMutableDictionary *traits = [[descriptor objectForKey:UIFontDescriptorTraitsAttribute] mutableCopy] ?: [NSMutableDictionary dictionary];
+    CGFloat originalWeight = [traits[UIFontWeightTrait] respondsToSelector:@selector(doubleValue)] ? [traits[UIFontWeightTrait] doubleValue] : UIFontWeightRegular;
+    CGFloat boostedWeight = originalWeight + (UIFontWeightBold - originalWeight) * ACEDescriptionWeightBoost();
+    traits[UIFontWeightTrait] = @(boostedWeight);
+    descriptor = [descriptor fontDescriptorByAddingAttributes:@{UIFontDescriptorTraitsAttribute: traits}];
+    return [UIFont fontWithDescriptor:descriptor size:MAX(6.0, font.pointSize * scale)];
 }
 
 static NSAttributedString *ACEScaledAttributedString(NSAttributedString *source, CGFloat scale) {
@@ -110,7 +123,7 @@ static void ACEApplyDescriptionTypographyToView(UIView *view, CGFloat scale) {
             if (base) objc_setAssociatedObject(view, &kACEDescriptionBaseFontKey, base, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
         }
         UIFont *scaled = ACEScaledFont(base, scale);
-        if (scaled && (!current || fabs(current.pointSize - scaled.pointSize) > 0.01)) {
+        if (scaled && ![current isEqual:scaled]) {
             objc_setAssociatedObject(view, &kACEDescriptionScaledFontKey, scaled, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
             ((void (*)(id, SEL, id))objc_msgSend)(view, fontSetter, scaled);
         }
@@ -436,7 +449,7 @@ static void ACEWaitForNativeLiveSources(id owner, NSUInteger attempt) {
 - (instancetype)init { return [super initWithStyle:UITableViewStyleInsetGrouped]; }
 - (void)viewDidLoad { [super viewDidLoad]; self.title = @"相机增强"; [self.tableView registerClass:UITableViewCell.class forCellReuseIdentifier:@"cell"]; }
 - (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView { return 2; }
-- (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section { return section == 0 ? 5 : 2; }
+- (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section { return section == 0 ? 5 : 3; }
 - (NSString *)tableView:(UITableView *)tableView titleForHeaderInSection:(NSInteger)section { return section == 0 ? @"拍摄设置" : @"首页文案"; }
 - (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section {
     return section == 0 ? @"设置立即保存，重新进入拍摄页后完整生效。最长录制为24小时，仍受存储和系统限制。"
@@ -456,12 +469,19 @@ static void ACEWaitForNativeLiveSources(id owner, NSUInteger attempt) {
             toggle.on = ACEEnabled(kACEDescriptionReflowKey);
             [toggle addTarget:self action:@selector(descriptionReflowChanged:) forControlEvents:UIControlEventValueChanged];
             cell.accessoryView = toggle;
-        } else {
-            cell.textLabel.text = [NSString stringWithFormat:@"文案字号比例：%.1f", ACEDescriptionScale()];
+        } else if (path.row == 1) {
+            cell.textLabel.text = [NSString stringWithFormat:@"文案字号比例：%.2f", ACEDescriptionScale()];
             UIStepper *stepper = [UIStepper new];
-            stepper.minimumValue = 0.3; stepper.maximumValue = 1.0; stepper.stepValue = 0.1;
+            stepper.minimumValue = 0.3; stepper.maximumValue = 1.0; stepper.stepValue = 0.01;
             stepper.value = ACEDescriptionScale();
             [stepper addTarget:self action:@selector(descriptionScaleChanged:) forControlEvents:UIControlEventValueChanged];
+            cell.accessoryView = stepper;
+        } else {
+            cell.textLabel.text = [NSString stringWithFormat:@"文案字重增强：%.1f", ACEDescriptionWeightBoost()];
+            UIStepper *stepper = [UIStepper new];
+            stepper.minimumValue = 0.0; stepper.maximumValue = 1.0; stepper.stepValue = 0.1;
+            stepper.value = ACEDescriptionWeightBoost();
+            [stepper addTarget:self action:@selector(descriptionWeightChanged:) forControlEvents:UIControlEventValueChanged];
             cell.accessoryView = stepper;
         }
         return cell;
@@ -484,9 +504,14 @@ static void ACEWaitForNativeLiveSources(id owner, NSUInteger attempt) {
     [NSUserDefaults.standardUserDefaults setBool:sender.isOn forKey:kACEDescriptionReflowKey];
 }
 - (void)descriptionScaleChanged:(UIStepper *)sender {
-    CGFloat rounded = round(sender.value * 10.0) / 10.0;
+    CGFloat rounded = round(sender.value * 100.0) / 100.0;
     [NSUserDefaults.standardUserDefaults setDouble:rounded forKey:kACEDescriptionScaleKey];
     [self.tableView reloadRowsAtIndexPaths:@[[NSIndexPath indexPathForRow:1 inSection:1]] withRowAnimation:UITableViewRowAnimationNone];
+}
+- (void)descriptionWeightChanged:(UIStepper *)sender {
+    CGFloat rounded = round(sender.value * 10.0) / 10.0;
+    [NSUserDefaults.standardUserDefaults setDouble:rounded forKey:kACEDescriptionWeightKey];
+    [self.tableView reloadRowsAtIndexPaths:@[[NSIndexPath indexPathForRow:2 inSection:1]] withRowAnimation:UITableViewRowAnimationNone];
 }
 - (void)changed:(UISwitch *)sender {
     NSArray *keys = @[kACEVideoDefaultKey, kACEUnlimitedDurationKey, kACELivePhotoDefaultKey, kACEPhotoSaveKey];
@@ -683,7 +708,7 @@ static void ACEWaitForNativeLiveSources(id owner, NSUInteger attempt) {
     if (!item || !section) return original;
     item.identifier = @"com.swiftss.awemecameraenhancer.settings";
     item.title = @"相机增强";
-    item.detail = @"1.3.9";
+    item.detail = @"1.4.0";
     item.type = 0;
     item.svgIconImageName = @"ic_sapling_outlined";
     item.cellType = 26;

@@ -45,6 +45,10 @@ static NSString *const kACERightButtonsOffsetKey = @"ACERightButtonsVerticalOffs
 static NSString *const kACEDescriptionReflowKey = @"ACEDescriptionReflowEnabled";
 static NSString *const kACEDescriptionScaleKey = @"ACEDescriptionFontScale";
 static NSString *const kACEDescriptionWeightKey = @"ACEDescriptionFontWeightBoost";
+static NSString *const kACENicknameReflowKey = @"ACENicknameReflowEnabled";
+static NSString *const kACENicknameScaleKey = @"ACENicknameFontScale";
+static NSString *const kACENicknameOffsetKey = @"ACENicknameVerticalOffset";
+static NSString *const kACEDescriptionOffsetKey = @"ACEDescriptionVerticalOffset";
 static __weak UIViewController *gACECameraController;
 static __weak ACCRecordSystemLivePhotoServiceImpl *gACESystemLivePhotoService;
 static __weak ACCVideoEditFlowControlComponent *gACEEditFlowControl;
@@ -86,30 +90,47 @@ static CGFloat ACEDescriptionWeightBoost(void) {
     return MIN(1.0, MAX(0.0, boost));
 }
 
-static UIFont *ACEScaledFont(UIFont *font, CGFloat scale) {
+static CGFloat ACENicknameScale(void) {
+    id value = [NSUserDefaults.standardUserDefaults objectForKey:kACENicknameScaleKey];
+    CGFloat scale = [value respondsToSelector:@selector(doubleValue)] ? [value doubleValue] : 1.0;
+    return MIN(1.5, MAX(0.3, scale));
+}
+
+static CGFloat ACEVerticalOffset(NSString *key) {
+    id value = [NSUserDefaults.standardUserDefaults objectForKey:key];
+    CGFloat configured = [value respondsToSelector:@selector(doubleValue)] ? [value doubleValue] : 0.0;
+    // User-facing convention: positive moves upward; UIKit positive Y is down.
+    return -MIN(100.0, MAX(-100.0, configured));
+}
+
+static CGFloat ACEConfiguredVerticalOffset(NSString *key) {
+    return -ACEVerticalOffset(key);
+}
+
+static UIFont *ACEScaledFont(UIFont *font, CGFloat scale, CGFloat weightBoost) {
     if (!font) return nil;
     UIFontDescriptor *descriptor = font.fontDescriptor;
     NSMutableDictionary *traits = [[descriptor objectForKey:UIFontDescriptorTraitsAttribute] mutableCopy] ?: [NSMutableDictionary dictionary];
     CGFloat originalWeight = [traits[UIFontWeightTrait] respondsToSelector:@selector(doubleValue)] ? [traits[UIFontWeightTrait] doubleValue] : UIFontWeightRegular;
-    CGFloat boostedWeight = originalWeight + (UIFontWeightBold - originalWeight) * ACEDescriptionWeightBoost();
+    CGFloat boostedWeight = originalWeight + (UIFontWeightBold - originalWeight) * weightBoost;
     traits[UIFontWeightTrait] = @(boostedWeight);
     descriptor = [descriptor fontDescriptorByAddingAttributes:@{UIFontDescriptorTraitsAttribute: traits}];
     return [UIFont fontWithDescriptor:descriptor size:MAX(6.0, font.pointSize * scale)];
 }
 
-static NSAttributedString *ACEScaledAttributedString(NSAttributedString *source, CGFloat scale) {
+static NSAttributedString *ACEScaledAttributedString(NSAttributedString *source, CGFloat scale, CGFloat weightBoost) {
     if (!source.length) return source;
     NSMutableAttributedString *result = [source mutableCopy];
     [source enumerateAttribute:NSFontAttributeName
                        inRange:NSMakeRange(0, source.length)
                        options:0
                     usingBlock:^(UIFont *font, NSRange range, __unused BOOL *stop) {
-        if ([font isKindOfClass:UIFont.class]) [result addAttribute:NSFontAttributeName value:ACEScaledFont(font, scale) range:range];
+        if ([font isKindOfClass:UIFont.class]) [result addAttribute:NSFontAttributeName value:ACEScaledFont(font, scale, weightBoost) range:range];
     }];
     return result;
 }
 
-static void ACEApplyDescriptionTypographyToView(UIView *view, CGFloat scale) {
+static void ACEApplyTextTypographyToView(UIView *view, CGFloat scale, CGFloat weightBoost, BOOL removesTruncation) {
     if (!view) return;
 
     SEL fontGetter = NSSelectorFromString(@"font");
@@ -122,7 +143,7 @@ static void ACEApplyDescriptionTypographyToView(UIView *view, CGFloat scale) {
             base = current;
             if (base) objc_setAssociatedObject(view, &kACEDescriptionBaseFontKey, base, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
         }
-        UIFont *scaled = ACEScaledFont(base, scale);
+        UIFont *scaled = ACEScaledFont(base, scale, weightBoost);
         if (scaled && ![current isEqual:scaled]) {
             objc_setAssociatedObject(view, &kACEDescriptionScaledFontKey, scaled, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
             ((void (*)(id, SEL, id))objc_msgSend)(view, fontSetter, scaled);
@@ -140,36 +161,52 @@ static void ACEApplyDescriptionTypographyToView(UIView *view, CGFloat scale) {
             objc_setAssociatedObject(view, &kACEDescriptionBaseAttributedTextKey, base, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
         }
         if (base.length) {
-            NSAttributedString *scaled = ACEScaledAttributedString(base, scale);
+            NSAttributedString *scaled = ACEScaledAttributedString(base, scale, weightBoost);
             objc_setAssociatedObject(view, &kACEDescriptionScaledAttributedTextKey, scaled, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
             ((void (*)(id, SEL, id))objc_msgSend)(view, attributedSetter, scaled);
         }
     }
 
     SEL numberSetter = NSSelectorFromString(@"setNumberOfLines:");
-    if ([view respondsToSelector:numberSetter]) ((void (*)(id, SEL, NSInteger))objc_msgSend)(view, numberSetter, 0);
+    if (removesTruncation && [view respondsToSelector:numberSetter]) ((void (*)(id, SEL, NSInteger))objc_msgSend)(view, numberSetter, 0);
     SEL maximumSetter = NSSelectorFromString(@"setMaximumNumberOfLines:");
-    if ([view respondsToSelector:maximumSetter]) ((void (*)(id, SEL, NSInteger))objc_msgSend)(view, maximumSetter, 0);
+    if (removesTruncation && [view respondsToSelector:maximumSetter]) ((void (*)(id, SEL, NSInteger))objc_msgSend)(view, maximumSetter, 0);
     SEL breakSetter = NSSelectorFromString(@"setLineBreakMode:");
     if ([view respondsToSelector:breakSetter]) ((void (*)(id, SEL, NSInteger))objc_msgSend)(view, breakSetter, NSLineBreakByWordWrapping);
     SEL tokenSetter = NSSelectorFromString(@"setTruncationToken:");
-    if ([view respondsToSelector:tokenSetter]) ((void (*)(id, SEL, id))objc_msgSend)(view, tokenSetter, nil);
+    if (removesTruncation && [view respondsToSelector:tokenSetter]) ((void (*)(id, SEL, id))objc_msgSend)(view, tokenSetter, nil);
     SEL widthSetter = NSSelectorFromString(@"setPreferredMaxLayoutWidth:");
     if ([view respondsToSelector:widthSetter] && CGRectGetWidth(view.bounds) > 1.0) {
         ((void (*)(id, SEL, CGFloat))objc_msgSend)(view, widthSetter, CGRectGetWidth(view.bounds));
     }
     [view invalidateIntrinsicContentSize];
-    for (UIView *subview in [view.subviews copy]) ACEApplyDescriptionTypographyToView(subview, scale);
+    for (UIView *subview in [view.subviews copy]) ACEApplyTextTypographyToView(subview, scale, weightBoost, removesTruncation);
+}
+
+static UIView *ACEElementView(id element) {
+    UIView *elementView = ACEValue(element, @"elementView");
+    if (![elementView isKindOfClass:UIView.class]) elementView = ACEValue(element, @"view");
+    return [elementView isKindOfClass:UIView.class] ? elementView : nil;
 }
 
 static void ACEApplyDescriptionReflow(id element) {
     if (!ACEEnabled(kACEDescriptionReflowKey)) return;
-    UIView *elementView = ACEValue(element, @"elementView");
-    if (![elementView isKindOfClass:UIView.class]) elementView = ACEValue(element, @"view");
-    if (![elementView isKindOfClass:UIView.class]) return;
-    elementView.transform = CGAffineTransformIdentity;
+    UIView *elementView = ACEElementView(element);
+    if (!elementView) return;
+    elementView.transform = CGAffineTransformMakeTranslation(0, ACEVerticalOffset(kACEDescriptionOffsetKey));
     elementView.clipsToBounds = NO;
-    ACEApplyDescriptionTypographyToView(elementView, ACEDescriptionScale());
+    ACEApplyTextTypographyToView(elementView, ACEDescriptionScale(), ACEDescriptionWeightBoost(), YES);
+    [elementView setNeedsLayout];
+    [elementView.superview setNeedsLayout];
+}
+
+static void ACEApplyNicknameReflow(id element) {
+    if (!ACEEnabled(kACENicknameReflowKey)) return;
+    UIView *elementView = ACEElementView(element);
+    if (!elementView) return;
+    elementView.transform = CGAffineTransformMakeTranslation(0, ACEVerticalOffset(kACENicknameOffsetKey));
+    elementView.clipsToBounds = NO;
+    ACEApplyTextTypographyToView(elementView, ACENicknameScale(), 0.0, NO);
     [elementView setNeedsLayout];
     [elementView.superview setNeedsLayout];
 }
@@ -449,11 +486,11 @@ static void ACEWaitForNativeLiveSources(id owner, NSUInteger attempt) {
 - (instancetype)init { return [super initWithStyle:UITableViewStyleInsetGrouped]; }
 - (void)viewDidLoad { [super viewDidLoad]; self.title = @"相机增强"; [self.tableView registerClass:UITableViewCell.class forCellReuseIdentifier:@"cell"]; }
 - (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView { return 2; }
-- (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section { return section == 0 ? 5 : 3; }
+- (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section { return section == 0 ? 5 : 7; }
 - (NSString *)tableView:(UITableView *)tableView titleForHeaderInSection:(NSInteger)section { return section == 0 ? @"拍摄设置" : @"首页文案"; }
 - (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section {
     return section == 0 ? @"设置立即保存，重新进入拍摄页后完整生效。最长录制为24小时，仍受存储和系统限制。"
-                        : @"请关闭 DYYY 的“文案缩放控制”。此功能按真实字号重新排版，而不是缩放整个文案图层。";
+                        : @"请关闭 DYYY 的文案缩放、昵称缩放、昵称上下偏移和文案上下偏移。这里的正值表示向上移动。";
 }
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)path {
     NSArray *titles = @[@"进入时默认视频", @"视频最长录制24小时", @"默认开启动态照片", @"动态照片自动保存并返回"];
@@ -476,12 +513,39 @@ static void ACEWaitForNativeLiveSources(id owner, NSUInteger attempt) {
             stepper.value = ACEDescriptionScale();
             [stepper addTarget:self action:@selector(descriptionScaleChanged:) forControlEvents:UIControlEventValueChanged];
             cell.accessoryView = stepper;
-        } else {
+        } else if (path.row == 2) {
             cell.textLabel.text = [NSString stringWithFormat:@"文案字重增强：%.1f", ACEDescriptionWeightBoost()];
             UIStepper *stepper = [UIStepper new];
             stepper.minimumValue = 0.0; stepper.maximumValue = 1.0; stepper.stepValue = 0.1;
             stepper.value = ACEDescriptionWeightBoost();
             [stepper addTarget:self action:@selector(descriptionWeightChanged:) forControlEvents:UIControlEventValueChanged];
+            cell.accessoryView = stepper;
+        } else if (path.row == 3) {
+            cell.textLabel.text = [NSString stringWithFormat:@"文案上移：%.0f px", ACEConfiguredVerticalOffset(kACEDescriptionOffsetKey)];
+            UIStepper *stepper = [UIStepper new];
+            stepper.minimumValue = -100; stepper.maximumValue = 100; stepper.stepValue = 1;
+            stepper.value = ACEConfiguredVerticalOffset(kACEDescriptionOffsetKey);
+            [stepper addTarget:self action:@selector(descriptionOffsetChanged:) forControlEvents:UIControlEventValueChanged];
+            cell.accessoryView = stepper;
+        } else if (path.row == 4) {
+            cell.textLabel.text = @"昵称真实字号缩放";
+            UISwitch *toggle = [UISwitch new];
+            toggle.on = ACEEnabled(kACENicknameReflowKey);
+            [toggle addTarget:self action:@selector(nicknameReflowChanged:) forControlEvents:UIControlEventValueChanged];
+            cell.accessoryView = toggle;
+        } else if (path.row == 5) {
+            cell.textLabel.text = [NSString stringWithFormat:@"昵称字号比例：%.2f", ACENicknameScale()];
+            UIStepper *stepper = [UIStepper new];
+            stepper.minimumValue = 0.3; stepper.maximumValue = 1.5; stepper.stepValue = 0.01;
+            stepper.value = ACENicknameScale();
+            [stepper addTarget:self action:@selector(nicknameScaleChanged:) forControlEvents:UIControlEventValueChanged];
+            cell.accessoryView = stepper;
+        } else {
+            cell.textLabel.text = [NSString stringWithFormat:@"昵称上移：%.0f px", ACEConfiguredVerticalOffset(kACENicknameOffsetKey)];
+            UIStepper *stepper = [UIStepper new];
+            stepper.minimumValue = -100; stepper.maximumValue = 100; stepper.stepValue = 1;
+            stepper.value = ACEConfiguredVerticalOffset(kACENicknameOffsetKey);
+            [stepper addTarget:self action:@selector(nicknameOffsetChanged:) forControlEvents:UIControlEventValueChanged];
             cell.accessoryView = stepper;
         }
         return cell;
@@ -512,6 +576,22 @@ static void ACEWaitForNativeLiveSources(id owner, NSUInteger attempt) {
     CGFloat rounded = round(sender.value * 10.0) / 10.0;
     [NSUserDefaults.standardUserDefaults setDouble:rounded forKey:kACEDescriptionWeightKey];
     [self.tableView reloadRowsAtIndexPaths:@[[NSIndexPath indexPathForRow:2 inSection:1]] withRowAnimation:UITableViewRowAnimationNone];
+}
+- (void)descriptionOffsetChanged:(UIStepper *)sender {
+    [NSUserDefaults.standardUserDefaults setDouble:sender.value forKey:kACEDescriptionOffsetKey];
+    [self.tableView reloadRowsAtIndexPaths:@[[NSIndexPath indexPathForRow:3 inSection:1]] withRowAnimation:UITableViewRowAnimationNone];
+}
+- (void)nicknameReflowChanged:(UISwitch *)sender {
+    [NSUserDefaults.standardUserDefaults setBool:sender.isOn forKey:kACENicknameReflowKey];
+}
+- (void)nicknameScaleChanged:(UIStepper *)sender {
+    CGFloat rounded = round(sender.value * 100.0) / 100.0;
+    [NSUserDefaults.standardUserDefaults setDouble:rounded forKey:kACENicknameScaleKey];
+    [self.tableView reloadRowsAtIndexPaths:@[[NSIndexPath indexPathForRow:5 inSection:1]] withRowAnimation:UITableViewRowAnimationNone];
+}
+- (void)nicknameOffsetChanged:(UIStepper *)sender {
+    [NSUserDefaults.standardUserDefaults setDouble:sender.value forKey:kACENicknameOffsetKey];
+    [self.tableView reloadRowsAtIndexPaths:@[[NSIndexPath indexPathForRow:6 inSection:1]] withRowAnimation:UITableViewRowAnimationNone];
 }
 - (void)changed:(UISwitch *)sender {
     NSArray *keys = @[kACEVideoDefaultKey, kACEUnlimitedDurationKey, kACELivePhotoDefaultKey, kACEPhotoSaveKey];
@@ -562,6 +642,24 @@ static void ACEWaitForNativeLiveSources(id owner, NSUInteger attempt) {
     dispatch_async(dispatch_get_main_queue(), ^{
         ACEApplyDescriptionReflow(weakElement);
     });
+}
+%end
+
+%hook AWEPlayInteractionAuthorElement
+- (void)layoutElementView {
+    %orig;
+    if (!ACEEnabled(kACENicknameReflowKey)) return;
+    __weak id weakElement = self;
+    dispatch_async(dispatch_get_main_queue(), ^{ ACEApplyNicknameReflow(weakElement); });
+}
+%end
+
+%hook AWEPlayInteractionStandardAuthorElement
+- (void)layoutElementView {
+    %orig;
+    if (!ACEEnabled(kACENicknameReflowKey)) return;
+    __weak id weakElement = self;
+    dispatch_async(dispatch_get_main_queue(), ^{ ACEApplyNicknameReflow(weakElement); });
 }
 %end
 
@@ -708,7 +806,7 @@ static void ACEWaitForNativeLiveSources(id owner, NSUInteger attempt) {
     if (!item || !section) return original;
     item.identifier = @"com.swiftss.awemecameraenhancer.settings";
     item.title = @"相机增强";
-    item.detail = @"1.4.0";
+    item.detail = @"1.4.1";
     item.type = 0;
     item.svgIconImageName = @"ic_sapling_outlined";
     item.cellType = 26;

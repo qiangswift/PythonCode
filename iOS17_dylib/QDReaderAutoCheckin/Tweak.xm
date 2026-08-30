@@ -676,12 +676,12 @@ static void QDRCollapseLeadReadHeadersInView(UIView *view) {
 %hook QDRShelfViewController
 - (void)viewDidAppear:(BOOL)animated {
     %orig;
-    QDRCollapseLeadReadHeadersInView(self.view);
+    QDRCollapseLeadReadHeadersInView(((UIViewController *)self).view);
 }
 - (void)enterForeground {
     %orig;
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.35 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        QDRCollapseLeadReadHeadersInView(self.view);
+        QDRCollapseLeadReadHeadersInView(((UIViewController *)self).view);
     });
 }
 %end

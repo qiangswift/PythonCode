@@ -48,6 +48,7 @@ static NSString *const kACEDescriptionWeightKey = @"ACEDescriptionFontWeightBoos
 static NSString *const kACENicknameReflowKey = @"ACENicknameReflowEnabled";
 static NSString *const kACENicknameScaleKey = @"ACENicknameFontScale";
 static NSString *const kACENicknameOffsetKey = @"ACENicknameVerticalOffset";
+static NSString *const kACENicknameNoDescriptionOffsetKey = @"ACENicknameNoDescriptionVerticalOffset";
 static NSString *const kACEDescriptionOffsetKey = @"ACEDescriptionVerticalOffset";
 static __weak UIViewController *gACECameraController;
 static __weak ACCRecordSystemLivePhotoServiceImpl *gACESystemLivePhotoService;
@@ -100,6 +101,9 @@ static CGFloat ACENicknameScale(void) {
 
 static CGFloat ACEVerticalOffset(NSString *key) {
     id value = [NSUserDefaults.standardUserDefaults objectForKey:key];
+    if (!value && [key isEqualToString:kACENicknameNoDescriptionOffsetKey]) {
+        value = [NSUserDefaults.standardUserDefaults objectForKey:kACENicknameOffsetKey];
+    }
     CGFloat configured = [value respondsToSelector:@selector(doubleValue)] ? [value doubleValue] : 0.0;
     // User-facing convention: positive moves upward; UIKit positive Y is down.
     return -MIN(100.0, MAX(-100.0, configured));
@@ -190,6 +194,23 @@ static void ACEApplyTextTypographyToView(UIView *view, CGFloat scale, CGFloat we
     for (UIView *subview in [view.subviews copy]) ACEApplyTextTypographyToView(subview, scale, weightBoost, removesTruncation);
 }
 
+static void ACEApplyTextColorToView(UIView *view, UIColor *color) {
+    if (!view || !color) return;
+    SEL colorSetter = NSSelectorFromString(@"setTextColor:");
+    if ([view respondsToSelector:colorSetter]) ((void (*)(id, SEL, id))objc_msgSend)(view, colorSetter, color);
+    SEL attributedGetter = NSSelectorFromString(@"attributedText");
+    SEL attributedSetter = NSSelectorFromString(@"setAttributedText:");
+    if ([view respondsToSelector:attributedGetter] && [view respondsToSelector:attributedSetter]) {
+        NSAttributedString *current = ((id (*)(id, SEL))objc_msgSend)(view, attributedGetter);
+        if (current.length) {
+            NSMutableAttributedString *colored = [current mutableCopy];
+            [colored addAttribute:NSForegroundColorAttributeName value:color range:NSMakeRange(0, colored.length)];
+            ((void (*)(id, SEL, id))objc_msgSend)(view, attributedSetter, colored);
+        }
+    }
+    for (UIView *subview in [view.subviews copy]) ACEApplyTextColorToView(subview, color);
+}
+
 static UIView *ACEElementView(id element) {
     UIView *elementView = ACEValue(element, @"elementView");
     if (![elementView isKindOfClass:UIView.class]) elementView = ACEValue(element, @"view");
@@ -209,9 +230,29 @@ static UIView *ACETextArrangedElementView(UIView *elementView) {
     return baseElement ?: elementView;
 }
 
+static BOOL ACEStackHasVisibleDescription(UIView *arrangedView) {
+    UIView *stack = arrangedView.superview;
+    Class stackClass = NSClassFromString(@"AWEElementStackView");
+    if (!stackClass || ![stack isKindOfClass:stackClass]) return NO;
+    SEL classNameSelector = NSSelectorFromString(@"elementClassName");
+    for (UIView *candidate in [stack.subviews copy]) {
+        if (candidate.hidden || candidate.alpha < 0.01 || CGRectGetHeight(candidate.bounds) < 0.5) continue;
+        NSString *className = [candidate respondsToSelector:classNameSelector]
+            ? ((id (*)(id, SEL))objc_msgSend)(candidate, classNameSelector) : nil;
+        if ([className isEqualToString:@"AWEPlayInteractionDescriptionElement"]) return YES;
+        if ([NSStringFromClass(candidate.class) containsString:@"Description"]) return YES;
+    }
+    return NO;
+}
+
+static NSString *ACENicknameOffsetKindForTarget(UIView *target) {
+    return ACEStackHasVisibleDescription(target) ? @"nickname" : @"nicknameNoDescription";
+}
+
 static void ACEApplyTextElementOffset(UIView *target, NSString *kind) {
     if (!target || !kind.length) return;
-    NSString *key = [kind isEqualToString:@"nickname"] ? kACENicknameOffsetKey : kACEDescriptionOffsetKey;
+    NSString *key = [kind isEqualToString:@"nickname"] ? kACENicknameOffsetKey
+        : ([kind isEqualToString:@"nicknameNoDescription"] ? kACENicknameNoDescriptionOffsetKey : kACEDescriptionOffsetKey);
     objc_setAssociatedObject(target, &kACETextElementKindKey, kind, OBJC_ASSOCIATION_COPY_NONATOMIC);
     objc_setAssociatedObject(target, &kACEApplyingTextTransformKey, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     target.transform = CGAffineTransformMakeTranslation(0, ACEVerticalOffset(key));
@@ -235,9 +276,10 @@ static void ACEApplyNicknameReflow(id element) {
     UIView *elementView = ACEElementView(element);
     if (!elementView) return;
     UIView *target = ACETextArrangedElementView(elementView);
-    ACEApplyTextElementOffset(target, @"nickname");
+    ACEApplyTextElementOffset(target, ACENicknameOffsetKindForTarget(target));
     elementView.clipsToBounds = NO;
     ACEApplyTextTypographyToView(elementView, ACENicknameScale(), 0.0, NO);
+    ACEApplyTextColorToView(elementView, UIColor.systemBlueColor);
     [elementView setNeedsLayout];
     [elementView.superview setNeedsLayout];
 }
@@ -246,7 +288,8 @@ static void ACEApplyNicknameFollowerOffset(id element) {
     if (!ACEEnabled(kACENicknameReflowKey)) return;
     UIView *elementView = ACEElementView(element);
     if (!elementView) return;
-    ACEApplyTextElementOffset(ACETextArrangedElementView(elementView), @"nickname");
+    UIView *target = ACETextArrangedElementView(elementView);
+    ACEApplyTextElementOffset(target, ACENicknameOffsetKindForTarget(target));
 }
 
 static NSHashTable<UIView *> *ACERightButtonViews(void) {
@@ -524,7 +567,7 @@ static void ACEWaitForNativeLiveSources(id owner, NSUInteger attempt) {
 - (instancetype)init { return [super initWithStyle:UITableViewStyleInsetGrouped]; }
 - (void)viewDidLoad { [super viewDidLoad]; self.title = @"相机增强"; [self.tableView registerClass:UITableViewCell.class forCellReuseIdentifier:@"cell"]; }
 - (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView { return 2; }
-- (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section { return section == 0 ? 5 : 7; }
+- (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section { return section == 0 ? 5 : 8; }
 - (NSString *)tableView:(UITableView *)tableView titleForHeaderInSection:(NSInteger)section { return section == 0 ? @"拍摄设置" : @"首页文案"; }
 - (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section {
     return section == 0 ? @"设置立即保存，重新进入拍摄页后完整生效。最长录制为24小时，仍受存储和系统限制。"
@@ -578,12 +621,19 @@ static void ACEWaitForNativeLiveSources(id owner, NSUInteger attempt) {
             stepper.value = ACENicknameScale();
             [stepper addTarget:self action:@selector(nicknameScaleChanged:) forControlEvents:UIControlEventValueChanged];
             cell.accessoryView = stepper;
-        } else {
-            cell.textLabel.text = [NSString stringWithFormat:@"昵称上移：%.0f px", ACEConfiguredVerticalOffset(kACENicknameOffsetKey)];
+        } else if (path.row == 6) {
+            cell.textLabel.text = [NSString stringWithFormat:@"有文案时昵称上移：%.0f px", ACEConfiguredVerticalOffset(kACENicknameOffsetKey)];
             UIStepper *stepper = [UIStepper new];
             stepper.minimumValue = -100; stepper.maximumValue = 100; stepper.stepValue = 1;
             stepper.value = ACEConfiguredVerticalOffset(kACENicknameOffsetKey);
             [stepper addTarget:self action:@selector(nicknameOffsetChanged:) forControlEvents:UIControlEventValueChanged];
+            cell.accessoryView = stepper;
+        } else {
+            cell.textLabel.text = [NSString stringWithFormat:@"无文案时昵称上移：%.0f px", ACEConfiguredVerticalOffset(kACENicknameNoDescriptionOffsetKey)];
+            UIStepper *stepper = [UIStepper new];
+            stepper.minimumValue = -100; stepper.maximumValue = 100; stepper.stepValue = 1;
+            stepper.value = ACEConfiguredVerticalOffset(kACENicknameNoDescriptionOffsetKey);
+            [stepper addTarget:self action:@selector(nicknameNoDescriptionOffsetChanged:) forControlEvents:UIControlEventValueChanged];
             cell.accessoryView = stepper;
         }
         return cell;
@@ -630,6 +680,10 @@ static void ACEWaitForNativeLiveSources(id owner, NSUInteger attempt) {
 - (void)nicknameOffsetChanged:(UIStepper *)sender {
     [NSUserDefaults.standardUserDefaults setDouble:sender.value forKey:kACENicknameOffsetKey];
     [self.tableView reloadRowsAtIndexPaths:@[[NSIndexPath indexPathForRow:6 inSection:1]] withRowAnimation:UITableViewRowAnimationNone];
+}
+- (void)nicknameNoDescriptionOffsetChanged:(UIStepper *)sender {
+    [NSUserDefaults.standardUserDefaults setDouble:sender.value forKey:kACENicknameNoDescriptionOffsetKey];
+    [self.tableView reloadRowsAtIndexPaths:@[[NSIndexPath indexPathForRow:7 inSection:1]] withRowAnimation:UITableViewRowAnimationNone];
 }
 - (void)changed:(UISwitch *)sender {
     NSArray *keys = @[kACEVideoDefaultKey, kACEUnlimitedDurationKey, kACELivePhotoDefaultKey, kACEPhotoSaveKey];
@@ -743,10 +797,11 @@ static void ACEWaitForNativeLiveSources(id owner, NSUInteger attempt) {
     NSString *kind = objc_getAssociatedObject(self, &kACETextElementKindKey);
     BOOL applying = [objc_getAssociatedObject(self, &kACEApplyingTextTransformKey) boolValue];
     if (kind.length && !applying) {
-        BOOL nickname = [kind isEqualToString:@"nickname"];
+        BOOL nickname = [kind hasPrefix:@"nickname"];
         BOOL enabled = ACEEnabled(nickname ? kACENicknameReflowKey : kACEDescriptionReflowKey);
         if (enabled) {
-            NSString *key = nickname ? kACENicknameOffsetKey : kACEDescriptionOffsetKey;
+            NSString *key = [kind isEqualToString:@"nicknameNoDescription"] ? kACENicknameNoDescriptionOffsetKey
+                : (nickname ? kACENicknameOffsetKey : kACEDescriptionOffsetKey);
             // Typography is scaled through real fonts.  Discard any later
             // container scale and preserve only the configured screen-point Y.
             transform = CGAffineTransformMakeTranslation(0, ACEVerticalOffset(key));
@@ -872,7 +927,7 @@ static void ACEWaitForNativeLiveSources(id owner, NSUInteger attempt) {
     if (!item || !section) return original;
     item.identifier = @"com.swiftss.awemecameraenhancer.settings";
     item.title = @"相机增强";
-    item.detail = @"1.4.3";
+    item.detail = @"1.4.4";
     item.type = 0;
     item.svgIconImageName = @"ic_sapling_outlined";
     item.cellType = 26;

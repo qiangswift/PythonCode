@@ -4,6 +4,7 @@
 #import <objc/runtime.h>
 #import <objc/message.h>
 #import <dlfcn.h>
+#import <mach-o/dyld.h>
 
 static NSString *const QDRTargetBundle = @"m.qidian.QDReaderAppStore";
 static NSString *const QDREnterpriseBundle = @"m.qidian.QDReaderQiYe";
@@ -119,15 +120,35 @@ static void QDRScheduleSplashSkip(NSUInteger attempt) {
 
 - (NSString *)scriptPath {
     Dl_info info = {0};
-    if (dladdr((const void *)&QDRTargetBundle, &info) && info.dli_fname) {
-        NSString *dylib = [NSString stringWithUTF8String:info.dli_fname];
-        // Follow the dylib into Relaxin/RootHide's randomized .jbroot and walk
-        // back from Library/MobileSubstrate/DynamicLibraries to Library.
-        NSString *library = [[[dylib stringByDeletingLastPathComponent]
-                              stringByDeletingLastPathComponent]
-                             stringByDeletingLastPathComponent];
+    NSString *dylib = nil;
+    // A function address is reliably mapped to this Mach-O image.  The old
+    // global NSString address can be coalesced and made dladdr return nothing.
+    if (dladdr((const void *)&QDRLog, &info) && info.dli_fname) {
+        dylib = [NSString stringWithUTF8String:info.dli_fname];
+    }
+    if (!dylib.length) {
+        for (uint32_t index = 0; index < _dyld_image_count(); index++) {
+            const char *name = _dyld_get_image_name(index);
+            if (!name) continue;
+            NSString *image = [NSString stringWithUTF8String:name];
+            if ([image.lastPathComponent isEqualToString:@"QDReaderAutoCheckin.dylib"]) {
+                dylib = image;
+                break;
+            }
+        }
+    }
+    if (dylib.length) {
+        NSString *marker = @"/Library/MobileSubstrate/DynamicLibraries/";
+        NSRange range = [dylib rangeOfString:marker options:NSBackwardsSearch];
+        NSString *library = range.location != NSNotFound
+            ? [[dylib substringToIndex:range.location] stringByAppendingPathComponent:@"Library"]
+            : [[[dylib stringByDeletingLastPathComponent] stringByDeletingLastPathComponent] stringByDeletingLastPathComponent];
         NSString *candidate = [library stringByAppendingPathComponent:@"Application Support/QDReaderAutoCheckin/qdreader.js"];
-        if ([[NSFileManager defaultManager] fileExistsAtPath:candidate]) return candidate;
+        BOOL exists = [[NSFileManager defaultManager] fileExistsAtPath:candidate];
+        QDRLog(@"script resolve dylib=%@ candidate=%@ exists=%d", dylib, candidate, exists);
+        if (exists) return candidate;
+    } else {
+        QDRLog(@"script resolve: own dylib image not found");
     }
     for (NSString *candidate in @[
         @"/var/jb/Library/Application Support/QDReaderAutoCheckin/qdreader.js",
@@ -306,7 +327,9 @@ static void QDRScheduleSplashSkip(NSUInteger attempt) {
         UIAlertController *alert = [UIAlertController alertControllerWithTitle:title message:message preferredStyle:UIAlertControllerStyleAlert];
         [alert addAction:[UIAlertAction actionWithTitle:@"知道了" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *action) { if (completion) completion(); }]];
         [vc presentViewController:alert animated:YES completion:nil];
-        BOOL transient = [title containsString:@"\u5f00\u59cb"] || [title containsString:@"\u81ea\u52a8\u7b7e\u5230"];
+        // Only the initial welfare-entry hint auto-dismisses.  Completion,
+        // failure, cookie and already-completed notices require confirmation.
+        BOOL transient = [title isEqualToString:@"\u4efb\u52a1\u5df2\u5f00\u59cb"];
         if (transient) dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
             if (alert.presentingViewController) [alert dismissViewControllerAnimated:YES completion:completion];
         });
@@ -584,7 +607,7 @@ static void QDRObserveTask(NSURLSessionTask *task) {
 %ctor {
     NSString *bundle = NSBundle.mainBundle.bundleIdentifier;
     if ([bundle isEqualToString:QDRTargetBundle] || [bundle isEqualToString:QDREnterpriseBundle]) {
-        QDRLog(@"loaded version=1.2.9 bundle=%@", bundle);
+        QDRLog(@"loaded version=1.3.0 bundle=%@", bundle);
         %init;
     }
 }

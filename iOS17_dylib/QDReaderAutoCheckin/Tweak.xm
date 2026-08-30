@@ -14,7 +14,7 @@ static NSString *const QDRPrefsSuite = @"com.swiftss.qdreaderautocheckin.runtime
 static NSString *const QDRLastCompletedKey = @"verifiedLastCompletedDateV2";
 static const void *QDRShelfFoldStateKey = &QDRShelfFoldStateKey;
 
-@interface QDRShelfTopAdView : UIView
+@interface QDRShelfNavView : UIView
 @end
 
 @interface QDRShelfViewController : UIViewController
@@ -620,31 +620,33 @@ static void QDRObserveTask(NSURLSessionTask *task) {
     QDRScheduleSplashSkip(0);
 }
 
-static UIButton *QDRFindShelfFoldButton(UIView *view) {
-    if ([view isKindOfClass:UIButton.class]) {
-        UIButton *button = (UIButton *)view;
-        NSString *title = [button titleForState:UIControlStateNormal] ?: @"";
-        NSString *label = button.accessibilityLabel ?: @"";
-        if ([title containsString:@"收起"] || [label containsString:@"收起"]) return button;
-    }
-    for (UIView *child in view.subviews) {
-        UIButton *button = QDRFindShelfFoldButton(child);
-        if (button) return button;
+static id QDRObjectIvar(id object, const char *name) {
+    for (Class cls = object_getClass(object); cls; cls = class_getSuperclass(cls)) {
+        Ivar ivar = class_getInstanceVariable(cls, name);
+        if (ivar) return object_getIvar(object, ivar);
     }
     return nil;
 }
 
-static void QDRFoldShelfBannerWhenReady(UIView *view, NSUInteger attempt) {
-    if (!view || [objc_getAssociatedObject(view, QDRShelfFoldStateKey) integerValue] == 2) return;
+static void QDRFoldShelfHeaderWhenReady(UIView *navView, NSUInteger attempt) {
+    if (!navView || [objc_getAssociatedObject(navView, QDRShelfFoldStateKey) integerValue] == 2) return;
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.15 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        if (!view.window) return;
-        UIButton *foldButton = QDRFindShelfFoldButton(view);
-        if (foldButton) {
-            objc_setAssociatedObject(view, QDRShelfFoldStateKey, @2, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-            [foldButton sendActionsForControlEvents:UIControlEventTouchUpInside];
-            QDRLog(@"bookshelf banner folded through native control class=%@", NSStringFromClass(view.class));
+        if (!navView.window) return;
+        UILabel *label = QDRObjectIvar(navView, "topAdTextLabel");
+        NSString *text = [label isKindOfClass:UILabel.class] ? label.text : nil;
+        if ([text containsString:@"收起"] && [navView respondsToSelector:@selector(headerTapped)]) {
+            objc_setAssociatedObject(navView, QDRShelfFoldStateKey, @2, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+            ((void (*)(id, SEL))objc_msgSend)(navView, @selector(headerTapped));
+            QDRLog(@"bookshelf header folded through native headerTapped text=%@", text);
+        } else if ([text containsString:@"展开"]) {
+            objc_setAssociatedObject(navView, QDRShelfFoldStateKey, @2, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+            QDRLog(@"bookshelf header already folded text=%@", text);
         } else if (attempt < 20) {
-            QDRFoldShelfBannerWhenReady(view, attempt + 1);
+            QDRFoldShelfHeaderWhenReady(navView, attempt + 1);
+        } else {
+            QDRLog(@"bookshelf fold unresolved label=%@ text=%@ headerTapped=%d",
+                   label ? NSStringFromClass([label class]) : @"<missing>",
+                   text ?: @"<missing>", [navView respondsToSelector:@selector(headerTapped)]);
         }
     });
 }
@@ -652,13 +654,13 @@ static void QDRFoldShelfBannerWhenReady(UIView *view, NSUInteger attempt) {
 
 %group QDRShelfPromotionHooks
 
-%hook QDRShelfTopAdView
+%hook QDRShelfNavView
 - (void)didMoveToWindow {
     %orig;
     UIView *view = (UIView *)self;
     if (view.window && !objc_getAssociatedObject(view, QDRShelfFoldStateKey)) {
         objc_setAssociatedObject(view, QDRShelfFoldStateKey, @1, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-        QDRFoldShelfBannerWhenReady(view, 0);
+        QDRFoldShelfHeaderWhenReady(view, 0);
     }
 }
 %end
@@ -677,17 +679,17 @@ static void QDRFoldShelfBannerWhenReady(UIView *view, NSUInteger attempt) {
 %ctor {
     NSString *bundle = NSBundle.mainBundle.bundleIdentifier;
     if ([bundle isEqualToString:QDRTargetBundle] || [bundle isEqualToString:QDREnterpriseBundle]) {
-        QDRLog(@"loaded version=1.3.6 bundle=%@", bundle);
+        QDRLog(@"loaded version=1.3.7 bundle=%@", bundle);
         %init;
-        Class topAdView = objc_getClass("_TtC16QDReaderAppStore20QDBookShelfTopAdView");
+        Class navView = objc_getClass("_TtC16QDReaderAppStore18QDBookShelfNavView");
         Class shelfVC = objc_getClass("_TtC16QDReaderAppStore25QDBookShelfViewController");
-        if (topAdView && shelfVC) {
+        if (navView && shelfVC) {
             %init(QDRShelfPromotionHooks,
-                  QDRShelfTopAdView = topAdView,
+                  QDRShelfNavView = navView,
                   QDRShelfViewController = shelfVC);
         } else {
-            QDRLog(@"bookshelf collapsed-state hook unavailable topAd=%d vc=%d",
-                   topAdView != Nil, shelfVC != Nil);
+            QDRLog(@"bookshelf collapsed-state hook unavailable nav=%d vc=%d",
+                   navView != Nil, shelfVC != Nil);
         }
     }
 }

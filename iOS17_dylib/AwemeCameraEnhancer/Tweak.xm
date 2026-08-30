@@ -139,9 +139,11 @@ static void ACEApplyTextTypographyToView(UIView *view, CGFloat scale, CGFloat we
     SEL fontSetter = NSSelectorFromString(@"setFont:");
     if ([view respondsToSelector:fontGetter] && [view respondsToSelector:fontSetter]) {
         UIFont *current = ((id (*)(id, SEL))objc_msgSend)(view, fontGetter);
-        UIFont *lastScaled = objc_getAssociatedObject(view, &kACEDescriptionScaledFontKey);
         UIFont *base = objc_getAssociatedObject(view, &kACEDescriptionBaseFontKey);
-        if (!base || (current && current != lastScaled && fabs(current.pointSize - lastScaled.pointSize) > 0.01)) {
+        // Reused feed cells can hand our already-scaled font back during the
+        // next layout pass.  Capture the native baseline once; never promote a
+        // rendered/scaled font into the baseline or the scale compounds.
+        if (!base) {
             base = current;
             if (base) objc_setAssociatedObject(view, &kACEDescriptionBaseFontKey, base, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
         }
@@ -156,9 +158,12 @@ static void ACEApplyTextTypographyToView(UIView *view, CGFloat scale, CGFloat we
     SEL attributedSetter = NSSelectorFromString(@"setAttributedText:");
     if ([view respondsToSelector:attributedGetter] && [view respondsToSelector:attributedSetter]) {
         NSAttributedString *current = ((id (*)(id, SEL))objc_msgSend)(view, attributedGetter);
-        NSAttributedString *lastScaled = objc_getAssociatedObject(view, &kACEDescriptionScaledAttributedTextKey);
         NSAttributedString *base = objc_getAssociatedObject(view, &kACEDescriptionBaseAttributedTextKey);
-        if (current.length && (!base || (current != lastScaled && ![current isEqualToAttributedString:lastScaled]))) {
+        // Attributes are rewritten on every pass, so identity/equality is not
+        // a safe signal.  A changed plain string means the reused cell now owns
+        // another video and is the only time a new native baseline is accepted.
+        BOOL contentChanged = current.length && base.length && ![current.string isEqualToString:base.string];
+        if (current.length && (!base || contentChanged)) {
             base = [current copy];
             objc_setAssociatedObject(view, &kACEDescriptionBaseAttributedTextKey, base, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
         }
@@ -235,6 +240,13 @@ static void ACEApplyNicknameReflow(id element) {
     ACEApplyTextTypographyToView(elementView, ACENicknameScale(), 0.0, NO);
     [elementView setNeedsLayout];
     [elementView.superview setNeedsLayout];
+}
+
+static void ACEApplyNicknameFollowerOffset(id element) {
+    if (!ACEEnabled(kACENicknameReflowKey)) return;
+    UIView *elementView = ACEElementView(element);
+    if (!elementView) return;
+    ACEApplyTextElementOffset(ACETextArrangedElementView(elementView), @"nickname");
 }
 
 static NSHashTable<UIView *> *ACERightButtonViews(void) {
@@ -689,6 +701,16 @@ static void ACEWaitForNativeLiveSources(id owner, NSUInteger attempt) {
 }
 %end
 
+
+%hook AWEPlayInteractionDanmakuElement
+- (void)layoutElementView {
+    %orig;
+    if (!ACEEnabled(kACENicknameReflowKey)) return;
+    __weak id weakElement = self;
+    dispatch_async(dispatch_get_main_queue(), ^{ ACEApplyNicknameFollowerOffset(weakElement); });
+}
+%end
+
 %group ACEProfileCommentBarGroup
 %hook ACECommentInputContainerView
 - (void)layoutSubviews {
@@ -850,7 +872,7 @@ static void ACEWaitForNativeLiveSources(id owner, NSUInteger attempt) {
     if (!item || !section) return original;
     item.identifier = @"com.swiftss.awemecameraenhancer.settings";
     item.title = @"相机增强";
-    item.detail = @"1.4.2";
+    item.detail = @"1.4.3";
     item.type = 0;
     item.svgIconImageName = @"ic_sapling_outlined";
     item.cellType = 26;

@@ -626,63 +626,63 @@ static BOOL QDRReadSwiftBoolIvar(id object, const char *name, BOOL *value, ptrdi
     return YES;
 }
 
-static id QDRObjectIvarContaining(id object, NSString *fragment, ptrdiff_t *resolvedOffset) {
-    unsigned int count = 0;
-    Ivar *ivars = class_copyIvarList(object_getClass(object), &count);
-    id value = nil;
-    for (unsigned int index = 0; index < count; index++) {
-        NSString *name = [NSString stringWithUTF8String:ivar_getName(ivars[index]) ?: ""];
-        if ([name containsString:fragment]) {
-            if (resolvedOffset) *resolvedOffset = ivar_getOffset(ivars[index]);
-            value = object_getIvar(object, ivars[index]);
-            break;
-        }
-    }
-    free(ivars);
-    return value;
+static BOOL QDRSwiftClosureReady(id object, const char *name, ptrdiff_t *resolvedOffset) {
+    Ivar ivar = class_getInstanceVariable(object_getClass(object), name);
+    if (!ivar) return NO;
+    ptrdiff_t offset = ivar_getOffset(ivar);
+    if (resolvedOffset) *resolvedOffset = offset;
+    uintptr_t *closure = (uintptr_t *)((uint8_t *)(__bridge void *)object + offset);
+    return closure[0] != 0;
 }
 
-static void QDRCollapseShelfThroughNavState(id controller, NSUInteger attempt) {
+static void QDRCollapseLeadReadHeader(id header, NSUInteger attempt) {
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.25 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        if (!controller || ![(UIViewController *)controller viewIfLoaded].window) return;
-        ptrdiff_t navOffset = -1;
-        id navView = QDRObjectIvarContaining(controller, @"navigationView", &navOffset);
-        BOOL bannerShowing = NO;
-        BOOL arrowDown = NO;
+        if (!header || ![header isKindOfClass:UIView.class] || ![(UIView *)header window]) return;
+        BOOL showing = NO;
         ptrdiff_t showingOffset = -1;
-        ptrdiff_t arrowOffset = -1;
-        BOOL hasShowing = navView && QDRReadSwiftBoolIvar(navView, "isTopAdBannerShowing", &bannerShowing, &showingOffset);
-        BOOL hasArrow = navView && QDRReadSwiftBoolIvar(navView, "arrowIsDown", &arrowDown, &arrowOffset);
-        if (hasShowing && hasArrow && bannerShowing) {
-            if (!arrowDown && [navView respondsToSelector:@selector(headerTapped)]) {
-                ((void (*)(id, SEL))objc_msgSend)(navView, @selector(headerTapped));
-                QDRLog(@"bookshelf native header collapse invoked nav=0x%tx showing=0x%tx arrow=0x%tx",
-                       navOffset, showingOffset, arrowOffset);
-            } else {
-                QDRLog(@"bookshelf header already collapsed banner=%d arrowDown=%d",
-                       bannerShowing, arrowDown);
-            }
+        ptrdiff_t handlerOffset = -1;
+        BOOL hasShowing = QDRReadSwiftBoolIvar(header, "isAdBgShowing", &showing, &showingOffset);
+        BOOL handlerReady = QDRSwiftClosureReady(header, "adFoldHandler", &handlerOffset);
+        if (hasShowing && !showing) return;
+        if (hasShowing && showing && handlerReady && [header respondsToSelector:@selector(foldBtnClicked)]) {
+            ((void (*)(id, SEL))objc_msgSend)(header, @selector(foldBtnClicked));
+            QDRLog(@"bookshelf native lead-read fold invoked showingOffset=0x%tx handlerOffset=0x%tx attempt=%lu",
+                   showingOffset, handlerOffset, (unsigned long)attempt);
         } else if (attempt < 40) {
-            QDRCollapseShelfThroughNavState(controller, attempt + 1);
+            QDRCollapseLeadReadHeader(header, attempt + 1);
         } else {
-            QDRLog(@"bookshelf nav state unresolved nav=%@ hasShowing=%d banner=%d hasArrow=%d arrowDown=%d",
-                   navView ? NSStringFromClass([navView class]) : @"<missing>",
-                   hasShowing, bannerShowing, hasArrow, arrowDown);
+            QDRLog(@"bookshelf lead-read fold unresolved hasShowing=%d showing=%d handlerReady=%d",
+                   hasShowing, showing, handlerReady);
         }
     });
+}
+
+static void QDRCollapseLeadReadHeadersInView(UIView *view) {
+    Class headerClass = objc_getClass("_TtC16QDReaderAppStore25QDBookShelfLeadReadHeader");
+    if (headerClass && [view isKindOfClass:headerClass]) QDRCollapseLeadReadHeader(view, 0);
+    for (UIView *subview in view.subviews) QDRCollapseLeadReadHeadersInView(subview);
 }
 %end
 
 %group QDRShelfPromotionHooks
 
+%hook QDRShelfLeadReadHeader
+- (void)updateWithConf {
+    %orig;
+    QDRCollapseLeadReadHeader(self, 0);
+}
+%end
+
 %hook QDRShelfViewController
 - (void)viewDidAppear:(BOOL)animated {
     %orig;
-    QDRCollapseShelfThroughNavState(self, 0);
+    QDRCollapseLeadReadHeadersInView(self.view);
 }
 - (void)enterForeground {
     %orig;
-    QDRCollapseShelfThroughNavState(self, 0);
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.35 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        QDRCollapseLeadReadHeadersInView(self.view);
+    });
 }
 %end
 
@@ -691,14 +691,16 @@ static void QDRCollapseShelfThroughNavState(id controller, NSUInteger attempt) {
 %ctor {
     NSString *bundle = NSBundle.mainBundle.bundleIdentifier;
     if ([bundle isEqualToString:QDRTargetBundle] || [bundle isEqualToString:QDREnterpriseBundle]) {
-        QDRLog(@"loaded version=1.4.3 bundle=%@", bundle);
+        QDRLog(@"loaded version=1.4.4 bundle=%@", bundle);
         %init;
         Class shelfVC = objc_getClass("_TtC16QDReaderAppStore25QDBookShelfViewController");
-        if (shelfVC) {
+        Class shelfHeader = objc_getClass("_TtC16QDReaderAppStore25QDBookShelfLeadReadHeader");
+        if (shelfVC && shelfHeader) {
             %init(QDRShelfPromotionHooks,
-                  QDRShelfViewController = shelfVC);
+                  QDRShelfViewController = shelfVC,
+                  QDRShelfLeadReadHeader = shelfHeader);
         } else {
-            QDRLog(@"bookshelf collapsed-state hook unavailable vc=0");
+            QDRLog(@"bookshelf fold hook unavailable vc=%d header=%d", shelfVC != Nil, shelfHeader != Nil);
         }
     }
 }

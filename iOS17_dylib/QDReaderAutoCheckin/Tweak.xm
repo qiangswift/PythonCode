@@ -12,6 +12,10 @@ static NSString *const QDRPrefsSuite = @"com.swiftss.qdreaderautocheckin.runtime
 // Do not trust the legacy completion key: versions through 1.2.7 wrote it
 // when JavaScript merely called $done(), even if no task request was made.
 static NSString *const QDRLastCompletedKey = @"verifiedLastCompletedDateV2";
+static const void *QDRShelfFoldStateKey = &QDRShelfFoldStateKey;
+
+@interface QDRShelfTopAdView : UIView
+@end
 
 @interface QDRShelfViewController : UIViewController
 @end
@@ -615,9 +619,48 @@ static void QDRObserveTask(NSURLSessionTask *task) {
     %orig;
     QDRScheduleSplashSkip(0);
 }
+
+static UIButton *QDRFindShelfFoldButton(UIView *view) {
+    if ([view isKindOfClass:UIButton.class]) {
+        UIButton *button = (UIButton *)view;
+        NSString *title = [button titleForState:UIControlStateNormal] ?: @"";
+        NSString *label = button.accessibilityLabel ?: @"";
+        if ([title containsString:@"收起"] || [label containsString:@"收起"]) return button;
+    }
+    for (UIView *child in view.subviews) {
+        UIButton *button = QDRFindShelfFoldButton(child);
+        if (button) return button;
+    }
+    return nil;
+}
+
+static void QDRFoldShelfBannerWhenReady(UIView *view, NSUInteger attempt) {
+    if (!view || [objc_getAssociatedObject(view, QDRShelfFoldStateKey) integerValue] == 2) return;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.15 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        if (!view.window) return;
+        UIButton *foldButton = QDRFindShelfFoldButton(view);
+        if (foldButton) {
+            objc_setAssociatedObject(view, QDRShelfFoldStateKey, @2, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+            [foldButton sendActionsForControlEvents:UIControlEventTouchUpInside];
+            QDRLog(@"bookshelf banner folded through native control class=%@", NSStringFromClass(view.class));
+        } else if (attempt < 20) {
+            QDRFoldShelfBannerWhenReady(view, attempt + 1);
+        }
+    });
+}
 %end
 
 %group QDRShelfPromotionHooks
+
+%hook QDRShelfTopAdView
+- (void)didMoveToWindow {
+    %orig;
+    if (self.window && !objc_getAssociatedObject(self, QDRShelfFoldStateKey)) {
+        objc_setAssociatedObject(self, QDRShelfFoldStateKey, @1, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        QDRFoldShelfBannerWhenReady(self, 0);
+    }
+}
+%end
 
 %hook QDRShelfViewController
 - (BOOL)isBgOpen {
@@ -633,14 +676,17 @@ static void QDRObserveTask(NSURLSessionTask *task) {
 %ctor {
     NSString *bundle = NSBundle.mainBundle.bundleIdentifier;
     if ([bundle isEqualToString:QDRTargetBundle] || [bundle isEqualToString:QDREnterpriseBundle]) {
-        QDRLog(@"loaded version=1.3.5 bundle=%@", bundle);
+        QDRLog(@"loaded version=1.3.6 bundle=%@", bundle);
         %init;
+        Class topAdView = objc_getClass("_TtC16QDReaderAppStore20QDBookShelfTopAdView");
         Class shelfVC = objc_getClass("_TtC16QDReaderAppStore25QDBookShelfViewController");
-        if (shelfVC) {
+        if (topAdView && shelfVC) {
             %init(QDRShelfPromotionHooks,
+                  QDRShelfTopAdView = topAdView,
                   QDRShelfViewController = shelfVC);
         } else {
-            QDRLog(@"bookshelf collapsed-state hook unavailable");
+            QDRLog(@"bookshelf collapsed-state hook unavailable topAd=%d vc=%d",
+                   topAdView != Nil, shelfVC != Nil);
         }
     }
 }

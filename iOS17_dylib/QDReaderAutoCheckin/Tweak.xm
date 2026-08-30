@@ -12,6 +12,7 @@ static NSString *const QDRPrefsSuite = @"com.swiftss.qdreaderautocheckin.runtime
 // Do not trust the legacy completion key: versions through 1.2.7 wrote it
 // when JavaScript merely called $done(), even if no task request was made.
 static NSString *const QDRLastCompletedKey = @"verifiedLastCompletedDateV2";
+static const void *QDRShelfNativeFoldKey = &QDRShelfNativeFoldKey;
 
 @interface QDRShelfViewController : UIViewController
 @end
@@ -616,30 +617,61 @@ static void QDRObserveTask(NSURLSessionTask *task) {
     QDRScheduleSplashSkip(0);
 }
 
-static BOOL QDRSetSwiftBoolIvar(id object, const char *name, BOOL value, ptrdiff_t *resolvedOffset) {
+static BOOL QDRReadSwiftBoolIvar(id object, const char *name, BOOL *value, ptrdiff_t *resolvedOffset) {
     Ivar ivar = class_getInstanceVariable(object_getClass(object), name);
     if (!ivar) return NO;
     ptrdiff_t offset = ivar_getOffset(ivar);
     if (resolvedOffset) *resolvedOffset = offset;
-    *((uint8_t *)(__bridge void *)object + offset) = value ? 1 : 0;
+    if (value) *value = *((uint8_t *)(__bridge void *)object + offset) != 0;
     return YES;
 }
 
-static void QDRForceShelfCollapsed(id controller, NSUInteger attempt) {
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.25 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        if (!controller || ![(UIViewController *)controller viewIfLoaded].window) return;
-        ptrdiff_t offset = -1;
-        BOOL wrote = QDRSetSwiftBoolIvar(controller, "isBgOpen", NO, &offset);
-        BOOL canRebuild = [controller respondsToSelector:@selector(rebuildLayout)];
-        if (wrote && canRebuild) {
-            ((void (*)(id, SEL))objc_msgSend)(controller, @selector(rebuildLayout));
-            QDRLog(@"bookshelf forced collapsed swiftIvarOffset=0x%tx attempt=%lu",
-                   offset, (unsigned long)attempt);
-        } else {
-            QDRLog(@"bookshelf direct collapse unavailable ivar=%d rebuild=%d",
-                   wrote, canRebuild);
+static id QDRObjectIvarContaining(id object, NSString *fragment, ptrdiff_t *resolvedOffset) {
+    unsigned int count = 0;
+    Ivar *ivars = class_copyIvarList(object_getClass(object), &count);
+    id value = nil;
+    for (unsigned int index = 0; index < count; index++) {
+        NSString *name = [NSString stringWithUTF8String:ivar_getName(ivars[index]) ?: ""];
+        if ([name containsString:fragment]) {
+            if (resolvedOffset) *resolvedOffset = ivar_getOffset(ivars[index]);
+            value = object_getIvar(object, ivars[index]);
+            break;
         }
-        if (attempt < 3) QDRForceShelfCollapsed(controller, attempt + 1);
+    }
+    free(ivars);
+    return value;
+}
+
+static void QDRInvokeNativeShelfFold(id controller, id topAdView, NSUInteger attempt) {
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.25 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        if (!controller || !topAdView || ![(UIViewController *)controller viewIfLoaded].window) return;
+        BOOL expanded = NO;
+        ptrdiff_t stateOffset = -1;
+        if (!QDRReadSwiftBoolIvar(controller, "isBgOpen", &expanded, &stateOffset)) {
+            QDRLog(@"bookshelf native fold unavailable: isBgOpen ivar missing");
+            return;
+        }
+        if (!expanded) {
+            QDRLog(@"bookshelf native fold already collapsed stateOffset=0x%tx", stateOffset);
+            return;
+        }
+        ptrdiff_t buttonOffset = -1;
+        UIControl *foldButton = QDRObjectIvarContaining(topAdView, @"foldBtn", &buttonOffset);
+        if ([foldButton isKindOfClass:UIControl.class]) {
+            if (!objc_getAssociatedObject(topAdView, QDRShelfNativeFoldKey)) {
+                objc_setAssociatedObject(topAdView, QDRShelfNativeFoldKey, @YES,
+                                         OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+                [foldButton sendActionsForControlEvents:UIControlEventTouchUpInside];
+                QDRLog(@"bookshelf native fold control invoked stateOffset=0x%tx buttonOffset=0x%tx actions=%@",
+                       stateOffset, buttonOffset,
+                       [foldButton actionsForTarget:nil forControlEvent:UIControlEventTouchUpInside]);
+            }
+        } else if (attempt < 20) {
+            QDRInvokeNativeShelfFold(controller, topAdView, attempt + 1);
+        } else {
+            QDRLog(@"bookshelf native fold unresolved foldBtn=%@ offset=0x%tx",
+                   foldButton ? NSStringFromClass([foldButton class]) : @"<missing>", buttonOffset);
+        }
     });
 }
 %end
@@ -649,17 +681,13 @@ static void QDRForceShelfCollapsed(id controller, NSUInteger attempt) {
 %hook QDRShelfViewController
 - (void)viewDidAppear:(BOOL)animated {
     %orig;
-    QDRForceShelfCollapsed(self, 0);
+    id topAdView = [self respondsToSelector:@selector(topAdView)]
+        ? ((id (*)(id, SEL))objc_msgSend)(self, @selector(topAdView)) : nil;
+    QDRInvokeNativeShelfFold(self, topAdView, 0);
 }
 - (void)setTopAdView:(id)view {
     %orig(view);
-    QDRForceShelfCollapsed(self, 0);
-}
-- (BOOL)isBgOpen {
-    return NO;
-}
-- (void)setIsBgOpen:(BOOL)open {
-    %orig(NO);
+    QDRInvokeNativeShelfFold(self, view, 0);
 }
 %end
 
@@ -668,7 +696,7 @@ static void QDRForceShelfCollapsed(id controller, NSUInteger attempt) {
 %ctor {
     NSString *bundle = NSBundle.mainBundle.bundleIdentifier;
     if ([bundle isEqualToString:QDRTargetBundle] || [bundle isEqualToString:QDREnterpriseBundle]) {
-        QDRLog(@"loaded version=1.3.9 bundle=%@", bundle);
+        QDRLog(@"loaded version=1.4.0 bundle=%@", bundle);
         %init;
         Class shelfVC = objc_getClass("_TtC16QDReaderAppStore25QDBookShelfViewController");
         if (shelfVC) {

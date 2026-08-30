@@ -194,23 +194,6 @@ static void ACEApplyTextTypographyToView(UIView *view, CGFloat scale, CGFloat we
     for (UIView *subview in [view.subviews copy]) ACEApplyTextTypographyToView(subview, scale, weightBoost, removesTruncation);
 }
 
-static void ACEApplyTextColorToView(UIView *view, UIColor *color) {
-    if (!view || !color) return;
-    SEL colorSetter = NSSelectorFromString(@"setTextColor:");
-    if ([view respondsToSelector:colorSetter]) ((void (*)(id, SEL, id))objc_msgSend)(view, colorSetter, color);
-    SEL attributedGetter = NSSelectorFromString(@"attributedText");
-    SEL attributedSetter = NSSelectorFromString(@"setAttributedText:");
-    if ([view respondsToSelector:attributedGetter] && [view respondsToSelector:attributedSetter]) {
-        NSAttributedString *current = ((id (*)(id, SEL))objc_msgSend)(view, attributedGetter);
-        if (current.length) {
-            NSMutableAttributedString *colored = [current mutableCopy];
-            [colored addAttribute:NSForegroundColorAttributeName value:color range:NSMakeRange(0, colored.length)];
-            ((void (*)(id, SEL, id))objc_msgSend)(view, attributedSetter, colored);
-        }
-    }
-    for (UIView *subview in [view.subviews copy]) ACEApplyTextColorToView(subview, color);
-}
-
 static UIView *ACEElementView(id element) {
     UIView *elementView = ACEValue(element, @"elementView");
     if (![elementView isKindOfClass:UIView.class]) elementView = ACEValue(element, @"view");
@@ -279,7 +262,6 @@ static void ACEApplyNicknameReflow(id element) {
     ACEApplyTextElementOffset(target, ACENicknameOffsetKindForTarget(target));
     elementView.clipsToBounds = NO;
     ACEApplyTextTypographyToView(elementView, ACENicknameScale(), 0.0, NO);
-    ACEApplyTextColorToView(elementView, UIColor.systemBlueColor);
     [elementView setNeedsLayout];
     [elementView.superview setNeedsLayout];
 }
@@ -927,7 +909,7 @@ static void ACEWaitForNativeLiveSources(id owner, NSUInteger attempt) {
     if (!item || !section) return original;
     item.identifier = @"com.swiftss.awemecameraenhancer.settings";
     item.title = @"相机增强";
-    item.detail = @"1.4.4";
+    item.detail = @"1.4.5";
     item.type = 0;
     item.svgIconImageName = @"ic_sapling_outlined";
     item.cellType = 26;

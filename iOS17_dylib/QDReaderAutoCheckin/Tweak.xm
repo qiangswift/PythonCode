@@ -633,7 +633,11 @@ static void QDRFoldShelfHeaderWhenReady(UIView *navView, NSUInteger attempt) {
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.15 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         if (!navView.window) return;
         UILabel *label = QDRObjectIvar(navView, "topAdTextLabel");
-        NSString *text = [label isKindOfClass:UILabel.class] ? label.text : nil;
+        NSString *text = nil;
+        if ([label isKindOfClass:UILabel.class]) {
+            text = label.text;
+            if (text.length == 0) text = label.attributedText.string;
+        }
         if ([text containsString:@"收起"] && [navView respondsToSelector:@selector(headerTapped)]) {
             objc_setAssociatedObject(navView, QDRShelfFoldStateKey, @2, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
             ((void (*)(id, SEL))objc_msgSend)(navView, @selector(headerTapped));
@@ -679,7 +683,7 @@ static void QDRFoldShelfHeaderWhenReady(UIView *navView, NSUInteger attempt) {
 %ctor {
     NSString *bundle = NSBundle.mainBundle.bundleIdentifier;
     if ([bundle isEqualToString:QDRTargetBundle] || [bundle isEqualToString:QDREnterpriseBundle]) {
-        QDRLog(@"loaded version=1.3.7 bundle=%@", bundle);
+        QDRLog(@"loaded version=1.3.8 bundle=%@", bundle);
         %init;
         Class navView = objc_getClass("_TtC16QDReaderAppStore18QDBookShelfNavView");
         Class shelfVC = objc_getClass("_TtC16QDReaderAppStore25QDBookShelfViewController");

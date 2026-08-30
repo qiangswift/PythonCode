@@ -661,10 +661,10 @@ static void QDRInvokeNativeShelfFold(id controller, id topAdView, NSUInteger att
             if (!objc_getAssociatedObject(topAdView, QDRShelfNativeFoldKey)) {
                 objc_setAssociatedObject(topAdView, QDRShelfNativeFoldKey, @YES,
                                          OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-                [foldButton sendActionsForControlEvents:UIControlEventTouchUpInside];
-                QDRLog(@"bookshelf native fold control invoked stateOffset=0x%tx buttonOffset=0x%tx actions=%@",
-                       stateOffset, buttonOffset,
-                       [foldButton actionsForTarget:nil forControlEvent:UIControlEventTouchUpInside]);
+                UIControlEvents events = foldButton.allControlEvents;
+                [foldButton sendActionsForControlEvents:UIControlEventPrimaryActionTriggered];
+                QDRLog(@"bookshelf native fold primary action invoked stateOffset=0x%tx buttonOffset=0x%tx allEvents=0x%llx",
+                       stateOffset, buttonOffset, (unsigned long long)events);
             }
         } else if (attempt < 20) {
             QDRInvokeNativeShelfFold(controller, topAdView, attempt + 1);
@@ -696,7 +696,7 @@ static void QDRInvokeNativeShelfFold(id controller, id topAdView, NSUInteger att
 %ctor {
     NSString *bundle = NSBundle.mainBundle.bundleIdentifier;
     if ([bundle isEqualToString:QDRTargetBundle] || [bundle isEqualToString:QDREnterpriseBundle]) {
-        QDRLog(@"loaded version=1.4.0 bundle=%@", bundle);
+        QDRLog(@"loaded version=1.4.1 bundle=%@", bundle);
         %init;
         Class shelfVC = objc_getClass("_TtC16QDReaderAppStore25QDBookShelfViewController");
         if (shelfVC) {

@@ -274,6 +274,15 @@ static void ACEApplyNicknameFollowerOffset(id element) {
     ACEApplyTextElementOffset(target, ACENicknameOffsetKindForTarget(target));
 }
 
+static void ACEApplyNicknameFollowerViewOffset(UIView *followerView) {
+    if (!ACEEnabled(kACENicknameReflowKey) || !followerView) return;
+    // In Aweme 40.2.0 the recommendation pill's element object does not
+    // reliably expose elementView/view.  Start at the concrete pill view so
+    // the complete arranged item (including its hit area) is moved.
+    UIView *target = ACETextArrangedElementView(followerView);
+    ACEApplyTextElementOffset(target, ACENicknameOffsetKindForTarget(target));
+}
+
 static NSHashTable<UIView *> *ACERightButtonViews(void) {
     static NSHashTable<UIView *> *views;
     static dispatch_once_t once;
@@ -759,6 +768,19 @@ static void ACEWaitForNativeLiveSources(id owner, NSUInteger attempt) {
 }
 %end
 
+
+%hook AWERecommendToFriendCardLabelView
+- (void)layoutSubviews {
+    %orig;
+    ACEApplyNicknameFollowerViewOffset(self);
+}
+
+- (void)didMoveToWindow {
+    %orig;
+    ACEApplyNicknameFollowerViewOffset(self);
+}
+%end
+
 %group ACEProfileCommentBarGroup
 %hook ACECommentInputContainerView
 - (void)layoutSubviews {
@@ -921,7 +943,7 @@ static void ACEWaitForNativeLiveSources(id owner, NSUInteger attempt) {
     if (!item || !section) return original;
     item.identifier = @"com.swiftss.awemecameraenhancer.settings";
     item.title = @"相机增强";
-    item.detail = @"1.4.6";
+    item.detail = @"1.4.7";
     item.type = 0;
     item.svgIconImageName = @"ic_sapling_outlined";
     item.cellType = 26;

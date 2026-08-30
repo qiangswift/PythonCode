@@ -42,6 +42,8 @@ static NSString *const kACEUnlimitedDurationKey = @"ACEUnlimitedDurationEnabled"
 static NSString *const kACELivePhotoDefaultKey = @"ACELivePhotoDefaultEnabled";
 static NSString *const kACEPhotoSaveKey = @"ACEPhotoAutoSaveEnabled";
 static NSString *const kACERightButtonsOffsetKey = @"ACERightButtonsVerticalOffset";
+static NSString *const kACEDescriptionReflowKey = @"ACEDescriptionReflowEnabled";
+static NSString *const kACEDescriptionScaleKey = @"ACEDescriptionFontScale";
 static __weak UIViewController *gACECameraController;
 static __weak ACCRecordSystemLivePhotoServiceImpl *gACESystemLivePhotoService;
 static __weak ACCVideoEditFlowControlComponent *gACEEditFlowControl;
@@ -52,6 +54,12 @@ static BOOL gACELiveSaveInProgress = NO;
 static char kACERightStackRegisteredKey;
 static char kACEApplyingTransformKey;
 static char kACECommentSubviewBaseTransformKey;
+static char kACEDescriptionBaseFontKey;
+static char kACEDescriptionScaledFontKey;
+static char kACEDescriptionBaseAttributedTextKey;
+static char kACEDescriptionScaledAttributedTextKey;
+
+static id ACEValue(id object, NSString *key);
 
 static BOOL ACEEnabled(NSString *key) {
     NSUserDefaults *defaults = NSUserDefaults.standardUserDefaults;
@@ -63,6 +71,94 @@ static BOOL ACEEnabled(NSString *key) {
 static CGFloat ACERightButtonsOffset(void) {
     NSUserDefaults *defaults = NSUserDefaults.standardUserDefaults;
     return [defaults objectForKey:kACERightButtonsOffsetKey] == nil ? 8.0 : [defaults doubleForKey:kACERightButtonsOffsetKey];
+}
+
+static CGFloat ACEDescriptionScale(void) {
+    id value = [NSUserDefaults.standardUserDefaults objectForKey:kACEDescriptionScaleKey];
+    CGFloat scale = [value respondsToSelector:@selector(doubleValue)] ? [value doubleValue] : 0.6;
+    return MIN(1.0, MAX(0.3, scale));
+}
+
+static UIFont *ACEScaledFont(UIFont *font, CGFloat scale) {
+    if (!font) return nil;
+    return [UIFont fontWithDescriptor:font.fontDescriptor size:MAX(6.0, font.pointSize * scale)];
+}
+
+static NSAttributedString *ACEScaledAttributedString(NSAttributedString *source, CGFloat scale) {
+    if (!source.length) return source;
+    NSMutableAttributedString *result = [source mutableCopy];
+    [source enumerateAttribute:NSFontAttributeName
+                       inRange:NSMakeRange(0, source.length)
+                       options:0
+                    usingBlock:^(UIFont *font, NSRange range, __unused BOOL *stop) {
+        if ([font isKindOfClass:UIFont.class]) [result addAttribute:NSFontAttributeName value:ACEScaledFont(font, scale) range:range];
+    }];
+    return result;
+}
+
+static void ACEApplyDescriptionTypographyToView(UIView *view, CGFloat scale) {
+    if (!view) return;
+
+    SEL fontGetter = NSSelectorFromString(@"font");
+    SEL fontSetter = NSSelectorFromString(@"setFont:");
+    if ([view respondsToSelector:fontGetter] && [view respondsToSelector:fontSetter]) {
+        UIFont *current = ((id (*)(id, SEL))objc_msgSend)(view, fontGetter);
+        UIFont *lastScaled = objc_getAssociatedObject(view, &kACEDescriptionScaledFontKey);
+        UIFont *base = objc_getAssociatedObject(view, &kACEDescriptionBaseFontKey);
+        if (!base || (current && current != lastScaled && fabs(current.pointSize - lastScaled.pointSize) > 0.01)) {
+            base = current;
+            if (base) objc_setAssociatedObject(view, &kACEDescriptionBaseFontKey, base, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        }
+        UIFont *scaled = ACEScaledFont(base, scale);
+        if (scaled && (!current || fabs(current.pointSize - scaled.pointSize) > 0.01)) {
+            objc_setAssociatedObject(view, &kACEDescriptionScaledFontKey, scaled, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+            ((void (*)(id, SEL, id))objc_msgSend)(view, fontSetter, scaled);
+        }
+    }
+
+    SEL attributedGetter = NSSelectorFromString(@"attributedText");
+    SEL attributedSetter = NSSelectorFromString(@"setAttributedText:");
+    if ([view respondsToSelector:attributedGetter] && [view respondsToSelector:attributedSetter]) {
+        NSAttributedString *current = ((id (*)(id, SEL))objc_msgSend)(view, attributedGetter);
+        NSAttributedString *lastScaled = objc_getAssociatedObject(view, &kACEDescriptionScaledAttributedTextKey);
+        NSAttributedString *base = objc_getAssociatedObject(view, &kACEDescriptionBaseAttributedTextKey);
+        if (current.length && (!base || (current != lastScaled && ![current isEqualToAttributedString:lastScaled]))) {
+            base = [current copy];
+            objc_setAssociatedObject(view, &kACEDescriptionBaseAttributedTextKey, base, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        }
+        if (base.length) {
+            NSAttributedString *scaled = ACEScaledAttributedString(base, scale);
+            objc_setAssociatedObject(view, &kACEDescriptionScaledAttributedTextKey, scaled, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+            ((void (*)(id, SEL, id))objc_msgSend)(view, attributedSetter, scaled);
+        }
+    }
+
+    SEL numberSetter = NSSelectorFromString(@"setNumberOfLines:");
+    if ([view respondsToSelector:numberSetter]) ((void (*)(id, SEL, NSInteger))objc_msgSend)(view, numberSetter, 0);
+    SEL maximumSetter = NSSelectorFromString(@"setMaximumNumberOfLines:");
+    if ([view respondsToSelector:maximumSetter]) ((void (*)(id, SEL, NSInteger))objc_msgSend)(view, maximumSetter, 0);
+    SEL breakSetter = NSSelectorFromString(@"setLineBreakMode:");
+    if ([view respondsToSelector:breakSetter]) ((void (*)(id, SEL, NSInteger))objc_msgSend)(view, breakSetter, NSLineBreakByWordWrapping);
+    SEL tokenSetter = NSSelectorFromString(@"setTruncationToken:");
+    if ([view respondsToSelector:tokenSetter]) ((void (*)(id, SEL, id))objc_msgSend)(view, tokenSetter, nil);
+    SEL widthSetter = NSSelectorFromString(@"setPreferredMaxLayoutWidth:");
+    if ([view respondsToSelector:widthSetter] && CGRectGetWidth(view.bounds) > 1.0) {
+        ((void (*)(id, SEL, CGFloat))objc_msgSend)(view, widthSetter, CGRectGetWidth(view.bounds));
+    }
+    [view invalidateIntrinsicContentSize];
+    for (UIView *subview in [view.subviews copy]) ACEApplyDescriptionTypographyToView(subview, scale);
+}
+
+static void ACEApplyDescriptionReflow(id element) {
+    if (!ACEEnabled(kACEDescriptionReflowKey)) return;
+    UIView *elementView = ACEValue(element, @"elementView");
+    if (![elementView isKindOfClass:UIView.class]) elementView = ACEValue(element, @"view");
+    if (![elementView isKindOfClass:UIView.class]) return;
+    elementView.transform = CGAffineTransformIdentity;
+    elementView.clipsToBounds = NO;
+    ACEApplyDescriptionTypographyToView(elementView, ACEDescriptionScale());
+    [elementView setNeedsLayout];
+    [elementView.superview setNeedsLayout];
 }
 
 static NSHashTable<UIView *> *ACERightButtonViews(void) {
@@ -339,14 +435,37 @@ static void ACEWaitForNativeLiveSources(id owner, NSUInteger attempt) {
 @implementation ACEPreferencesController
 - (instancetype)init { return [super initWithStyle:UITableViewStyleInsetGrouped]; }
 - (void)viewDidLoad { [super viewDidLoad]; self.title = @"相机增强"; [self.tableView registerClass:UITableViewCell.class forCellReuseIdentifier:@"cell"]; }
-- (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView { return 1; }
-- (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section { return 5; }
-- (NSString *)tableView:(UITableView *)tableView titleForHeaderInSection:(NSInteger)section { return @"拍摄设置"; }
-- (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section { return @"设置立即保存，重新进入拍摄页后完整生效。最长录制为24小时，仍受存储和系统限制。"; }
+- (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView { return 2; }
+- (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section { return section == 0 ? 5 : 2; }
+- (NSString *)tableView:(UITableView *)tableView titleForHeaderInSection:(NSInteger)section { return section == 0 ? @"拍摄设置" : @"首页文案"; }
+- (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section {
+    return section == 0 ? @"设置立即保存，重新进入拍摄页后完整生效。最长录制为24小时，仍受存储和系统限制。"
+                        : @"请关闭 DYYY 的“文案缩放控制”。此功能按真实字号重新排版，而不是缩放整个文案图层。";
+}
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)path {
     NSArray *titles = @[@"进入时默认视频", @"视频最长录制24小时", @"默认开启动态照片", @"动态照片自动保存并返回"];
     NSArray *keys = @[kACEVideoDefaultKey, kACEUnlimitedDurationKey, kACELivePhotoDefaultKey, kACEPhotoSaveKey];
     UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:@"cell" forIndexPath:path];
+    cell.accessoryView = nil;
+    cell.detailTextLabel.text = nil;
+    if (path.section == 1) {
+        cell.selectionStyle = UITableViewCellSelectionStyleNone;
+        if (path.row == 0) {
+            cell.textLabel.text = @"文案真实字号重排";
+            UISwitch *toggle = [UISwitch new];
+            toggle.on = ACEEnabled(kACEDescriptionReflowKey);
+            [toggle addTarget:self action:@selector(descriptionReflowChanged:) forControlEvents:UIControlEventValueChanged];
+            cell.accessoryView = toggle;
+        } else {
+            cell.textLabel.text = [NSString stringWithFormat:@"文案字号比例：%.1f", ACEDescriptionScale()];
+            UIStepper *stepper = [UIStepper new];
+            stepper.minimumValue = 0.3; stepper.maximumValue = 1.0; stepper.stepValue = 0.1;
+            stepper.value = ACEDescriptionScale();
+            [stepper addTarget:self action:@selector(descriptionScaleChanged:) forControlEvents:UIControlEventValueChanged];
+            cell.accessoryView = stepper;
+        }
+        return cell;
+    }
     if (path.row == 4) {
         cell.textLabel.text = [NSString stringWithFormat:@"右侧按钮上移：%.0f px", ACERightButtonsOffset()];
         cell.selectionStyle = UITableViewCellSelectionStyleNone;
@@ -360,6 +479,14 @@ static void ACEWaitForNativeLiveSources(id owner, NSUInteger attempt) {
     cell.textLabel.text = titles[path.row]; cell.selectionStyle = UITableViewCellSelectionStyleNone;
     UISwitch *toggle = [UISwitch new]; toggle.tag = path.row; toggle.on = ACEEnabled(keys[path.row]);
     [toggle addTarget:self action:@selector(changed:) forControlEvents:UIControlEventValueChanged]; cell.accessoryView = toggle; return cell;
+}
+- (void)descriptionReflowChanged:(UISwitch *)sender {
+    [NSUserDefaults.standardUserDefaults setBool:sender.isOn forKey:kACEDescriptionReflowKey];
+}
+- (void)descriptionScaleChanged:(UIStepper *)sender {
+    CGFloat rounded = round(sender.value * 10.0) / 10.0;
+    [NSUserDefaults.standardUserDefaults setDouble:rounded forKey:kACEDescriptionScaleKey];
+    [self.tableView reloadRowsAtIndexPaths:@[[NSIndexPath indexPathForRow:1 inSection:1]] withRowAnimation:UITableViewRowAnimationNone];
 }
 - (void)changed:(UISwitch *)sender {
     NSArray *keys = @[kACEVideoDefaultKey, kACEUnlimitedDurationKey, kACELivePhotoDefaultKey, kACEPhotoSaveKey];
@@ -396,6 +523,20 @@ static void ACEWaitForNativeLiveSources(id owner, NSUInteger attempt) {
     ACELog(@"MODE every original-query forceVideo=%d", ACEEnabled(kACEVideoDefaultKey));
     if (ACEEnabled(kACEVideoDefaultKey)) return NO;
     return %orig;
+}
+%end
+
+%hook AWEPlayInteractionDescriptionElement
+- (void)layoutElementView {
+    %orig;
+    if (!ACEEnabled(kACEDescriptionReflowKey)) return;
+    __weak id weakElement = self;
+    // Run after every participant in the hook chain (including DYYY) has
+    // completed its layout pass, so a plugin load-order change cannot restore
+    // the container-scale transform on the same pass.
+    dispatch_async(dispatch_get_main_queue(), ^{
+        ACEApplyDescriptionReflow(weakElement);
+    });
 }
 %end
 
@@ -542,7 +683,7 @@ static void ACEWaitForNativeLiveSources(id owner, NSUInteger attempt) {
     if (!item || !section) return original;
     item.identifier = @"com.swiftss.awemecameraenhancer.settings";
     item.title = @"相机增强";
-    item.detail = @"1.3.8";
+    item.detail = @"1.3.9";
     item.type = 0;
     item.svgIconImageName = @"ic_sapling_outlined";
     item.cellType = 26;

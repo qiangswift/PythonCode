@@ -655,9 +655,10 @@ static void QDRFoldShelfBannerWhenReady(UIView *view, NSUInteger attempt) {
 %hook QDRShelfTopAdView
 - (void)didMoveToWindow {
     %orig;
-    if (self.window && !objc_getAssociatedObject(self, QDRShelfFoldStateKey)) {
-        objc_setAssociatedObject(self, QDRShelfFoldStateKey, @1, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-        QDRFoldShelfBannerWhenReady(self, 0);
+    UIView *view = (UIView *)self;
+    if (view.window && !objc_getAssociatedObject(view, QDRShelfFoldStateKey)) {
+        objc_setAssociatedObject(view, QDRShelfFoldStateKey, @1, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        QDRFoldShelfBannerWhenReady(view, 0);
     }
 }
 %end

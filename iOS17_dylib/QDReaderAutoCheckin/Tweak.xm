@@ -12,10 +12,12 @@ static NSString *const QDRPrefsSuite = @"com.swiftss.qdreaderautocheckin.runtime
 // Do not trust the legacy completion key: versions through 1.2.7 wrote it
 // when JavaScript merely called $done(), even if no task request was made.
 static NSString *const QDRLastCompletedKey = @"verifiedLastCompletedDateV2";
+static const void *QDRShelfCollapseInFlightKey = &QDRShelfCollapseInFlightKey;
 
 @interface QDRShelfViewController : UIViewController
 @end
 
+extern "C" void QDRInvokeShelfLayout(void *function, id controller, BOOL expanded);
 
 static NSString *QDRLogPath(void) {
     NSString *documents = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES).firstObject;
@@ -635,6 +637,40 @@ static BOOL QDRSwiftClosureReady(id object, const char *name, ptrdiff_t *resolve
     return closure[0] != 0;
 }
 
+static id QDRShelfControllerForView(UIView *view) {
+    Class shelfClass = objc_getClass("_TtC16QDReaderAppStore25QDBookShelfViewController");
+    UIResponder *responder = view;
+    while ((responder = responder.nextResponder)) {
+        if (shelfClass && [responder isKindOfClass:shelfClass]) return responder;
+    }
+    return nil;
+}
+
+static void QDRForceShelfCollapsedLayout(id controller) {
+    if (!controller) {
+        QDRLog(@"bookshelf internal collapse unavailable controller=nil");
+        return;
+    }
+    Ivar stateIvar = class_getInstanceVariable(object_getClass(controller), "isBgOpen");
+    if (!stateIvar) {
+        QDRLog(@"bookshelf internal collapse unavailable isBgOpen=nil");
+        return;
+    }
+    ptrdiff_t stateOffset = ivar_getOffset(stateIvar);
+    uint8_t *state = (uint8_t *)(__bridge void *)controller + stateOffset;
+    BOOL before = *state != 0;
+    // The native function returns immediately when its input equals the stale
+    // controller flag.  The app can display the expanded artwork while this
+    // flag is false, so normalize it to true before requesting collapsed=false.
+    *state = 1;
+    const struct mach_header *header = _dyld_get_image_header(0);
+    void *layoutFunction = header ? (void *)((uintptr_t)header + 0x8d7ef8) : NULL;
+    if (layoutFunction) QDRInvokeShelfLayout(layoutFunction, controller, NO);
+    BOOL after = *state != 0;
+    QDRLog(@"bookshelf internal collapsed layout invoked function=0x8d7ef8 stateOffset=0x%tx before=%d after=%d",
+           stateOffset, before, after);
+}
+
 static void QDRCollapseLeadReadHeader(id header, NSUInteger attempt) {
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.25 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         if (!header || ![header isKindOfClass:UIView.class] || ![(UIView *)header window]) return;
@@ -645,9 +681,15 @@ static void QDRCollapseLeadReadHeader(id header, NSUInteger attempt) {
         BOOL handlerReady = QDRSwiftClosureReady(header, "adFoldHandler", &handlerOffset);
         if (hasShowing && !showing) return;
         if (hasShowing && showing && handlerReady && [header respondsToSelector:@selector(foldBtnClicked)]) {
+            if (objc_getAssociatedObject(header, QDRShelfCollapseInFlightKey)) return;
+            objc_setAssociatedObject(header, QDRShelfCollapseInFlightKey, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
             ((void (*)(id, SEL))objc_msgSend)(header, @selector(foldBtnClicked));
+            QDRForceShelfCollapsedLayout(QDRShelfControllerForView(header));
             QDRLog(@"bookshelf native lead-read fold invoked showingOffset=0x%tx handlerOffset=0x%tx attempt=%lu",
                    showingOffset, handlerOffset, (unsigned long)attempt);
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+                objc_setAssociatedObject(header, QDRShelfCollapseInFlightKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+            });
         } else if (attempt < 40) {
             QDRCollapseLeadReadHeader(header, attempt + 1);
         } else {
@@ -691,7 +733,7 @@ static void QDRCollapseLeadReadHeadersInView(UIView *view) {
 %ctor {
     NSString *bundle = NSBundle.mainBundle.bundleIdentifier;
     if ([bundle isEqualToString:QDRTargetBundle] || [bundle isEqualToString:QDREnterpriseBundle]) {
-        QDRLog(@"loaded version=1.4.4 bundle=%@", bundle);
+        QDRLog(@"loaded version=1.4.5 bundle=%@", bundle);
         %init;
         Class shelfVC = objc_getClass("_TtC16QDReaderAppStore25QDBookShelfViewController");
         Class shelfHeader = objc_getClass("_TtC16QDReaderAppStore25QDBookShelfLeadReadHeader");

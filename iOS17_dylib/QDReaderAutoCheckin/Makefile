@@ -5,7 +5,7 @@ INSTALL_TARGET_PROCESSES = QDReaderAppStore
 include $(THEOS)/makefiles/common.mk
 
 TWEAK_NAME = QDReaderAutoCheckin
-QDReaderAutoCheckin_FILES = Tweak.xm
+QDReaderAutoCheckin_FILES = Tweak.xm ShelfLayoutBridge.S
 QDReaderAutoCheckin_CFLAGS = -fobjc-arc
 QDReaderAutoCheckin_FRAMEWORKS = UIKit Foundation JavaScriptCore
 

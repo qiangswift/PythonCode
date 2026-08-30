@@ -138,6 +138,16 @@ static void QDRScheduleSplashSkip(NSUInteger attempt) {
         }
     }
     if (dylib.length) {
+        // RootHide maps Library/MobileSubstrate/DynamicLibraries to
+        // <random .jbroot>/usr/lib/TweakInject.  Keep the resource beside the
+        // dylib so the same transformation always applies to both files.
+        NSString *adjacent = [[dylib stringByDeletingLastPathComponent]
+                              stringByAppendingPathComponent:@"QDReaderAutoCheckin/qdreader.js"];
+        BOOL adjacentExists = [[NSFileManager defaultManager] fileExistsAtPath:adjacent];
+        QDRLog(@"script resolve dylib=%@ adjacent=%@ exists=%d", dylib, adjacent, adjacentExists);
+        if (adjacentExists) return adjacent;
+
+        // Compatibility with older rootful/rootless layouts.
         NSString *marker = @"/Library/MobileSubstrate/DynamicLibraries/";
         NSRange range = [dylib rangeOfString:marker options:NSBackwardsSearch];
         NSString *library = range.location != NSNotFound
@@ -145,7 +155,7 @@ static void QDRScheduleSplashSkip(NSUInteger attempt) {
             : [[[dylib stringByDeletingLastPathComponent] stringByDeletingLastPathComponent] stringByDeletingLastPathComponent];
         NSString *candidate = [library stringByAppendingPathComponent:@"Application Support/QDReaderAutoCheckin/qdreader.js"];
         BOOL exists = [[NSFileManager defaultManager] fileExistsAtPath:candidate];
-        QDRLog(@"script resolve dylib=%@ candidate=%@ exists=%d", dylib, candidate, exists);
+        QDRLog(@"script legacy candidate=%@ exists=%d", candidate, exists);
         if (exists) return candidate;
     } else {
         QDRLog(@"script resolve: own dylib image not found");
@@ -607,7 +617,7 @@ static void QDRObserveTask(NSURLSessionTask *task) {
 %ctor {
     NSString *bundle = NSBundle.mainBundle.bundleIdentifier;
     if ([bundle isEqualToString:QDRTargetBundle] || [bundle isEqualToString:QDREnterpriseBundle]) {
-        QDRLog(@"loaded version=1.3.0 bundle=%@", bundle);
+        QDRLog(@"loaded version=1.3.1 bundle=%@", bundle);
         %init;
     }
 }

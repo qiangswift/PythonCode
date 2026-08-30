@@ -17,7 +17,7 @@ static const void *QDRShelfNativeFoldKey = &QDRShelfNativeFoldKey;
 @interface QDRShelfViewController : UIViewController
 @end
 
-extern void QDRInvokeSwiftVoidClosure(void *function, void *context);
+extern "C" void QDRInvokeSwiftVoidClosure(void *function, void *context);
 
 static NSString *QDRLogPath(void) {
     NSString *documents = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES).firstObject;

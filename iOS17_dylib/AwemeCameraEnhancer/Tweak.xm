@@ -747,6 +747,18 @@ static void ACEWaitForNativeLiveSources(id owner, NSUInteger attempt) {
 }
 %end
 
+%hook AWEPlayInteractionRecommendToFeedCardLabelElement
+- (void)layoutElementView {
+    %orig;
+    if (!ACEEnabled(kACENicknameReflowKey)) return;
+    __weak id weakElement = self;
+    // Keep the complete recommendation pill (visuals and hit-testing) aligned
+    // with the nickname group. Applying this to the arranged element also
+    // avoids accumulating offsets when feed cells are reused.
+    dispatch_async(dispatch_get_main_queue(), ^{ ACEApplyNicknameFollowerOffset(weakElement); });
+}
+%end
+
 %group ACEProfileCommentBarGroup
 %hook ACECommentInputContainerView
 - (void)layoutSubviews {
@@ -909,7 +921,7 @@ static void ACEWaitForNativeLiveSources(id owner, NSUInteger attempt) {
     if (!item || !section) return original;
     item.identifier = @"com.swiftss.awemecameraenhancer.settings";
     item.title = @"相机增强";
-    item.detail = @"1.4.5";
+    item.detail = @"1.4.6";
     item.type = 0;
     item.svgIconImageName = @"ic_sapling_outlined";
     item.cellType = 26;

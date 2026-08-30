@@ -772,12 +772,12 @@ static void ACEWaitForNativeLiveSources(id owner, NSUInteger attempt) {
 %hook AWERecommendToFriendCardLabelView
 - (void)layoutSubviews {
     %orig;
-    ACEApplyNicknameFollowerViewOffset(self);
+    ACEApplyNicknameFollowerViewOffset((UIView *)self);
 }
 
 - (void)didMoveToWindow {
     %orig;
-    ACEApplyNicknameFollowerViewOffset(self);
+    ACEApplyNicknameFollowerViewOffset((UIView *)self);
 }
 %end
 

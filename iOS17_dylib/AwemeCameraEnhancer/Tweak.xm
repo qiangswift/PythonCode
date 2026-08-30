@@ -63,6 +63,8 @@ static char kACEDescriptionBaseFontKey;
 static char kACEDescriptionScaledFontKey;
 static char kACEDescriptionBaseAttributedTextKey;
 static char kACEDescriptionScaledAttributedTextKey;
+static char kACETextElementKindKey;
+static char kACEApplyingTextTransformKey;
 
 static id ACEValue(id object, NSString *key);
 
@@ -189,11 +191,34 @@ static UIView *ACEElementView(id element) {
     return [elementView isKindOfClass:UIView.class] ? elementView : nil;
 }
 
+static UIView *ACETextArrangedElementView(UIView *elementView) {
+    if (!elementView) return nil;
+    Class stackClass = NSClassFromString(@"AWEElementStackView");
+    UIView *baseElement = nil;
+    Class baseClass = NSClassFromString(@"AWEBaseElementView");
+    for (UIView *ancestor = elementView; ancestor; ancestor = ancestor.superview) {
+        if (!baseElement && baseClass && [ancestor isKindOfClass:baseClass]) baseElement = ancestor;
+        if (stackClass && [ancestor.superview isKindOfClass:stackClass]) return ancestor;
+        if (stackClass && [ancestor isKindOfClass:stackClass]) break;
+    }
+    return baseElement ?: elementView;
+}
+
+static void ACEApplyTextElementOffset(UIView *target, NSString *kind) {
+    if (!target || !kind.length) return;
+    NSString *key = [kind isEqualToString:@"nickname"] ? kACENicknameOffsetKey : kACEDescriptionOffsetKey;
+    objc_setAssociatedObject(target, &kACETextElementKindKey, kind, OBJC_ASSOCIATION_COPY_NONATOMIC);
+    objc_setAssociatedObject(target, &kACEApplyingTextTransformKey, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    target.transform = CGAffineTransformMakeTranslation(0, ACEVerticalOffset(key));
+    objc_setAssociatedObject(target, &kACEApplyingTextTransformKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+}
+
 static void ACEApplyDescriptionReflow(id element) {
     if (!ACEEnabled(kACEDescriptionReflowKey)) return;
     UIView *elementView = ACEElementView(element);
     if (!elementView) return;
-    elementView.transform = CGAffineTransformMakeTranslation(0, ACEVerticalOffset(kACEDescriptionOffsetKey));
+    UIView *target = ACETextArrangedElementView(elementView);
+    ACEApplyTextElementOffset(target, @"description");
     elementView.clipsToBounds = NO;
     ACEApplyTextTypographyToView(elementView, ACEDescriptionScale(), ACEDescriptionWeightBoost(), YES);
     [elementView setNeedsLayout];
@@ -204,7 +229,8 @@ static void ACEApplyNicknameReflow(id element) {
     if (!ACEEnabled(kACENicknameReflowKey)) return;
     UIView *elementView = ACEElementView(element);
     if (!elementView) return;
-    elementView.transform = CGAffineTransformMakeTranslation(0, ACEVerticalOffset(kACENicknameOffsetKey));
+    UIView *target = ACETextArrangedElementView(elementView);
+    ACEApplyTextElementOffset(target, @"nickname");
     elementView.clipsToBounds = NO;
     ACEApplyTextTypographyToView(elementView, ACENicknameScale(), 0.0, NO);
     [elementView setNeedsLayout];
@@ -690,6 +716,24 @@ static void ACEWaitForNativeLiveSources(id owner, NSUInteger attempt) {
 }
 %end
 
+%hook UIView
+- (void)setTransform:(CGAffineTransform)transform {
+    NSString *kind = objc_getAssociatedObject(self, &kACETextElementKindKey);
+    BOOL applying = [objc_getAssociatedObject(self, &kACEApplyingTextTransformKey) boolValue];
+    if (kind.length && !applying) {
+        BOOL nickname = [kind isEqualToString:@"nickname"];
+        BOOL enabled = ACEEnabled(nickname ? kACENicknameReflowKey : kACEDescriptionReflowKey);
+        if (enabled) {
+            NSString *key = nickname ? kACENicknameOffsetKey : kACEDescriptionOffsetKey;
+            // Typography is scaled through real fonts.  Discard any later
+            // container scale and preserve only the configured screen-point Y.
+            transform = CGAffineTransformMakeTranslation(0, ACEVerticalOffset(key));
+        }
+    }
+    %orig(transform);
+}
+%end
+
 %hook UIStackView
 - (void)setTransform:(CGAffineTransform)transform {
     BOOL registered = [objc_getAssociatedObject(self, &kACERightStackRegisteredKey) boolValue];
@@ -806,7 +850,7 @@ static void ACEWaitForNativeLiveSources(id owner, NSUInteger attempt) {
     if (!item || !section) return original;
     item.identifier = @"com.swiftss.awemecameraenhancer.settings";
     item.title = @"相机增强";
-    item.detail = @"1.4.1";
+    item.detail = @"1.4.2";
     item.type = 0;
     item.svgIconImageName = @"ic_sapling_outlined";
     item.cellType = 26;

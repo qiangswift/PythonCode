@@ -1,6 +1,6 @@
 Package: com.swiftss.awemecameraenhancer
 Name: Aweme Camera Enhancer
-Version: 1.4.1
+Version: 1.4.2
 Architecture: iphoneos-arm
 Description: Enhances Douyin 40.2.0 camera and Live Photo workflow, adds native settings integration, feed layout controls, and real-font description reflow.
 Maintainer: liqiang

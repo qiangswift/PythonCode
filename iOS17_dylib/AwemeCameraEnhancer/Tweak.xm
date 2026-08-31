@@ -276,11 +276,10 @@ static void ACEApplyNicknameFollowerOffset(id element) {
 
 static void ACEApplyNicknameFollowerViewOffset(UIView *followerView) {
     if (!ACEEnabled(kACENicknameReflowKey) || !followerView) return;
-    // In Aweme 40.2.0 the recommendation pill's element object does not
-    // reliably expose elementView/view.  Start at the concrete pill view so
-    // the complete arranged item (including its hit area) is moved.
-    UIView *target = ACETextArrangedElementView(followerView);
-    ACEApplyTextElementOffset(target, ACENicknameOffsetKindForTarget(target));
+    // AFDFriendRecommendTagView is the concrete "共 xx 人推荐" pill.  It owns
+    // its background, avatars, labels, right button and hitTest implementation,
+    // so translating the view moves both pixels and the interactive region.
+    ACEApplyTextElementOffset(followerView, @"nickname");
 }
 
 static NSHashTable<UIView *> *ACERightButtonViews(void) {
@@ -756,27 +755,24 @@ static void ACEWaitForNativeLiveSources(id owner, NSUInteger attempt) {
 }
 %end
 
-%hook AWEPlayInteractionRecommendToFeedCardLabelElement
-- (void)layoutElementView {
-    %orig;
-    if (!ACEEnabled(kACENicknameReflowKey)) return;
-    __weak id weakElement = self;
-    // Keep the complete recommendation pill (visuals and hit-testing) aligned
-    // with the nickname group. Applying this to the arranged element also
-    // avoids accumulating offsets when feed cells are reused.
-    dispatch_async(dispatch_get_main_queue(), ^{ ACEApplyNicknameFollowerOffset(weakElement); });
-}
-%end
-
-
-%hook AWERecommendToFriendCardLabelView
+%hook AFDFriendRecommendTagView
 - (void)layoutSubviews {
     %orig;
     ACEApplyNicknameFollowerViewOffset((UIView *)self);
 }
 
-- (void)didMoveToWindow {
+- (void)updateUI {
     %orig;
+    ACEApplyNicknameFollowerViewOffset((UIView *)self);
+}
+
+- (void)updateDynamicUI {
+    %orig;
+    ACEApplyNicknameFollowerViewOffset((UIView *)self);
+}
+
+- (void)updateWithModel:(id)model {
+    %orig(model);
     ACEApplyNicknameFollowerViewOffset((UIView *)self);
 }
 %end
@@ -943,7 +939,7 @@ static void ACEWaitForNativeLiveSources(id owner, NSUInteger attempt) {
     if (!item || !section) return original;
     item.identifier = @"com.swiftss.awemecameraenhancer.settings";
     item.title = @"相机增强";
-    item.detail = @"1.4.7";
+    item.detail = @"1.4.8";
     item.type = 0;
     item.svgIconImageName = @"ic_sapling_outlined";
     item.cellType = 26;

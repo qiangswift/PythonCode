@@ -49,6 +49,7 @@ static NSString *const kACENicknameReflowKey = @"ACENicknameReflowEnabled";
 static NSString *const kACENicknameScaleKey = @"ACENicknameFontScale";
 static NSString *const kACENicknameOffsetKey = @"ACENicknameVerticalOffset";
 static NSString *const kACENicknameNoDescriptionOffsetKey = @"ACENicknameNoDescriptionVerticalOffset";
+static NSString *const kACERecommendOffsetKey = @"ACERecommendVerticalOffset";
 static NSString *const kACEDescriptionOffsetKey = @"ACEDescriptionVerticalOffset";
 static __weak UIViewController *gACECameraController;
 static __weak ACCRecordSystemLivePhotoServiceImpl *gACESystemLivePhotoService;
@@ -66,6 +67,7 @@ static char kACEDescriptionBaseAttributedTextKey;
 static char kACEDescriptionScaledAttributedTextKey;
 static char kACETextElementKindKey;
 static char kACEApplyingTextTransformKey;
+static char kACERecommendLabelObservedKey;
 
 static id ACEValue(id object, NSString *key);
 
@@ -102,6 +104,9 @@ static CGFloat ACENicknameScale(void) {
 static CGFloat ACEVerticalOffset(NSString *key) {
     id value = [NSUserDefaults.standardUserDefaults objectForKey:key];
     if (!value && [key isEqualToString:kACENicknameNoDescriptionOffsetKey]) {
+        value = [NSUserDefaults.standardUserDefaults objectForKey:kACENicknameOffsetKey];
+    }
+    if (!value && [key isEqualToString:kACERecommendOffsetKey]) {
         value = [NSUserDefaults.standardUserDefaults objectForKey:kACENicknameOffsetKey];
     }
     CGFloat configured = [value respondsToSelector:@selector(doubleValue)] ? [value doubleValue] : 0.0;
@@ -235,7 +240,8 @@ static NSString *ACENicknameOffsetKindForTarget(UIView *target) {
 static void ACEApplyTextElementOffset(UIView *target, NSString *kind) {
     if (!target || !kind.length) return;
     NSString *key = [kind isEqualToString:@"nickname"] ? kACENicknameOffsetKey
-        : ([kind isEqualToString:@"nicknameNoDescription"] ? kACENicknameNoDescriptionOffsetKey : kACEDescriptionOffsetKey);
+        : ([kind isEqualToString:@"nicknameNoDescription"] ? kACENicknameNoDescriptionOffsetKey
+        : ([kind isEqualToString:@"recommend"] ? kACERecommendOffsetKey : kACEDescriptionOffsetKey));
     objc_setAssociatedObject(target, &kACETextElementKindKey, kind, OBJC_ASSOCIATION_COPY_NONATOMIC);
     objc_setAssociatedObject(target, &kACEApplyingTextTransformKey, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     target.transform = CGAffineTransformMakeTranslation(0, ACEVerticalOffset(key));
@@ -275,11 +281,56 @@ static void ACEApplyNicknameFollowerOffset(id element) {
 }
 
 static void ACEApplyNicknameFollowerViewOffset(UIView *followerView) {
-    if (!ACEEnabled(kACENicknameReflowKey) || !followerView) return;
+    if (!followerView) return;
     // AFDFriendRecommendTagView is the concrete "共 xx 人推荐" pill.  It owns
     // its background, avatars, labels, right button and hitTest implementation,
     // so translating the view moves both pixels and the interactive region.
-    ACEApplyTextElementOffset(followerView, @"nickname");
+    ACEApplyTextElementOffset(followerView, @"recommend");
+}
+
+static BOOL ACEIsRecommendCountText(NSString *text) {
+    if (![text isKindOfClass:NSString.class] || text.length == 0) return NO;
+    return [text containsString:@"推荐"] && [text containsString:@"人"];
+}
+
+static UIView *ACERecommendContainerForLabel(UIView *label) {
+    UIView *fallback = nil;
+    for (UIView *view = label.superview; view && view != label.window; view = view.superview) {
+        NSString *name = NSStringFromClass(view.class);
+        if ([name containsString:@"Recommend"] || [name containsString:@"recommend"] || [name containsString:@"FriendTag"]) return view;
+        CGFloat width = CGRectGetWidth(view.bounds), height = CGRectGetHeight(view.bounds);
+        if (!fallback && width >= CGRectGetWidth(label.bounds) && width <= UIScreen.mainScreen.bounds.size.width * 0.8 && height >= 20.0 && height <= 90.0) {
+            fallback = view;
+        }
+    }
+    return fallback;
+}
+
+static void ACELogRecommendRuntime(NSString *text, UIView *label, UIView *container) {
+    if ([objc_getAssociatedObject(label, &kACERecommendLabelObservedKey) boolValue]) return;
+    objc_setAssociatedObject(label, &kACERecommendLabelObservedKey, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    NSMutableArray *chain = [NSMutableArray array];
+    for (UIView *view = label; view && chain.count < 10; view = view.superview) {
+        [chain addObject:[NSString stringWithFormat:@"%@ frame=%@", NSStringFromClass(view.class), NSStringFromCGRect(view.frame)]];
+    }
+    NSString *line = [NSString stringWithFormat:@"%@ recommendation text=%@ selected=%@ offset=%.0f chain=%@\n",
+                      NSDate.date, text, NSStringFromClass(container.class), ACEConfiguredVerticalOffset(kACERecommendOffsetKey),
+                      [chain componentsJoinedByString:@" <- "]];
+    NSString *documents = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES).firstObject;
+    NSString *path = [documents stringByAppendingPathComponent:@"AwemeCameraEnhancer-Recommend.log"];
+    NSData *data = [line dataUsingEncoding:NSUTF8StringEncoding];
+    if (![[NSFileManager defaultManager] fileExistsAtPath:path]) [data writeToFile:path atomically:YES];
+    else {
+        NSFileHandle *handle = [NSFileHandle fileHandleForWritingAtPath:path];
+        [handle seekToEndOfFile]; [handle writeData:data]; [handle closeFile];
+    }
+}
+
+static void ACEApplyDetectedRecommendLabel(UIView *label, NSString *text) {
+    if (!ACEIsRecommendCountText(text)) return;
+    UIView *container = ACERecommendContainerForLabel(label);
+    ACELogRecommendRuntime(text, label, container);
+    if (container) ACEApplyTextElementOffset(container, @"recommend");
 }
 
 static NSHashTable<UIView *> *ACERightButtonViews(void) {
@@ -557,7 +608,7 @@ static void ACEWaitForNativeLiveSources(id owner, NSUInteger attempt) {
 - (instancetype)init { return [super initWithStyle:UITableViewStyleInsetGrouped]; }
 - (void)viewDidLoad { [super viewDidLoad]; self.title = @"相机增强"; [self.tableView registerClass:UITableViewCell.class forCellReuseIdentifier:@"cell"]; }
 - (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView { return 2; }
-- (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section { return section == 0 ? 5 : 8; }
+- (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section { return section == 0 ? 5 : 9; }
 - (NSString *)tableView:(UITableView *)tableView titleForHeaderInSection:(NSInteger)section { return section == 0 ? @"拍摄设置" : @"首页文案"; }
 - (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section {
     return section == 0 ? @"设置立即保存，重新进入拍摄页后完整生效。最长录制为24小时，仍受存储和系统限制。"
@@ -618,12 +669,19 @@ static void ACEWaitForNativeLiveSources(id owner, NSUInteger attempt) {
             stepper.value = ACEConfiguredVerticalOffset(kACENicknameOffsetKey);
             [stepper addTarget:self action:@selector(nicknameOffsetChanged:) forControlEvents:UIControlEventValueChanged];
             cell.accessoryView = stepper;
-        } else {
+        } else if (path.row == 7) {
             cell.textLabel.text = [NSString stringWithFormat:@"无文案时昵称上移：%.0f px", ACEConfiguredVerticalOffset(kACENicknameNoDescriptionOffsetKey)];
             UIStepper *stepper = [UIStepper new];
             stepper.minimumValue = -100; stepper.maximumValue = 100; stepper.stepValue = 1;
             stepper.value = ACEConfiguredVerticalOffset(kACENicknameNoDescriptionOffsetKey);
             [stepper addTarget:self action:@selector(nicknameNoDescriptionOffsetChanged:) forControlEvents:UIControlEventValueChanged];
+            cell.accessoryView = stepper;
+        } else {
+            cell.textLabel.text = [NSString stringWithFormat:@"推荐按钮上移：%.0f px", ACEConfiguredVerticalOffset(kACERecommendOffsetKey)];
+            UIStepper *stepper = [UIStepper new];
+            stepper.minimumValue = -100; stepper.maximumValue = 100; stepper.stepValue = 1;
+            stepper.value = ACEConfiguredVerticalOffset(kACERecommendOffsetKey);
+            [stepper addTarget:self action:@selector(recommendOffsetChanged:) forControlEvents:UIControlEventValueChanged];
             cell.accessoryView = stepper;
         }
         return cell;
@@ -753,6 +811,10 @@ static void ACEWaitForNativeLiveSources(id owner, NSUInteger attempt) {
     __weak id weakElement = self;
     dispatch_async(dispatch_get_main_queue(), ^{ ACEApplyNicknameFollowerOffset(weakElement); });
 }
+- (void)recommendOffsetChanged:(UIStepper *)sender {
+    [NSUserDefaults.standardUserDefaults setDouble:sender.value forKey:kACERecommendOffsetKey];
+    [self.tableView reloadRowsAtIndexPaths:@[[NSIndexPath indexPathForRow:8 inSection:1]] withRowAnimation:UITableViewRowAnimationNone];
+}
 %end
 
 %hook AFDFriendRecommendTagView
@@ -809,17 +871,43 @@ static void ACEWaitForNativeLiveSources(id owner, NSUInteger attempt) {
     NSString *kind = objc_getAssociatedObject(self, &kACETextElementKindKey);
     BOOL applying = [objc_getAssociatedObject(self, &kACEApplyingTextTransformKey) boolValue];
     if (kind.length && !applying) {
+        BOOL recommend = [kind isEqualToString:@"recommend"];
         BOOL nickname = [kind hasPrefix:@"nickname"];
         BOOL enabled = ACEEnabled(nickname ? kACENicknameReflowKey : kACEDescriptionReflowKey);
+        if (recommend) enabled = YES;
         if (enabled) {
             NSString *key = [kind isEqualToString:@"nicknameNoDescription"] ? kACENicknameNoDescriptionOffsetKey
-                : (nickname ? kACENicknameOffsetKey : kACEDescriptionOffsetKey);
+                : (recommend ? kACERecommendOffsetKey : (nickname ? kACENicknameOffsetKey : kACEDescriptionOffsetKey));
             // Typography is scaled through real fonts.  Discard any later
             // container scale and preserve only the configured screen-point Y.
             transform = CGAffineTransformMakeTranslation(0, ACEVerticalOffset(key));
         }
     }
     %orig(transform);
+}
+%end
+
+%hook UILabel
+- (void)setText:(NSString *)text {
+    %orig(text);
+    if (ACEIsRecommendCountText(text)) {
+        __weak UILabel *weakLabel = self;
+        dispatch_async(dispatch_get_main_queue(), ^{ ACEApplyDetectedRecommendLabel(weakLabel, weakLabel.text); });
+    }
+}
+
+- (void)setAttributedText:(NSAttributedString *)text {
+    %orig(text);
+    if (ACEIsRecommendCountText(text.string)) {
+        __weak UILabel *weakLabel = self;
+        dispatch_async(dispatch_get_main_queue(), ^{ ACEApplyDetectedRecommendLabel(weakLabel, weakLabel.attributedText.string); });
+    }
+}
+
+- (void)layoutSubviews {
+    %orig;
+    NSString *text = self.attributedText.string ?: self.text;
+    if (ACEIsRecommendCountText(text)) ACEApplyDetectedRecommendLabel(self, text);
 }
 %end
 
@@ -939,7 +1027,7 @@ static void ACEWaitForNativeLiveSources(id owner, NSUInteger attempt) {
     if (!item || !section) return original;
     item.identifier = @"com.swiftss.awemecameraenhancer.settings";
     item.title = @"相机增强";
-    item.detail = @"1.4.8";
+    item.detail = @"1.4.9";
     item.type = 0;
     item.svgIconImageName = @"ic_sapling_outlined";
     item.cellType = 26;

@@ -733,6 +733,10 @@ static void ACEWaitForNativeLiveSources(id owner, NSUInteger attempt) {
     [NSUserDefaults.standardUserDefaults setDouble:sender.value forKey:kACENicknameNoDescriptionOffsetKey];
     [self.tableView reloadRowsAtIndexPaths:@[[NSIndexPath indexPathForRow:7 inSection:1]] withRowAnimation:UITableViewRowAnimationNone];
 }
+- (void)recommendOffsetChanged:(UIStepper *)sender {
+    [NSUserDefaults.standardUserDefaults setDouble:sender.value forKey:kACERecommendOffsetKey];
+    [self.tableView reloadRowsAtIndexPaths:@[[NSIndexPath indexPathForRow:8 inSection:1]] withRowAnimation:UITableViewRowAnimationNone];
+}
 - (void)changed:(UISwitch *)sender {
     NSArray *keys = @[kACEVideoDefaultKey, kACEUnlimitedDurationKey, kACELivePhotoDefaultKey, kACEPhotoSaveKey];
     if (sender.tag >= 0 && sender.tag < (NSInteger)keys.count) [NSUserDefaults.standardUserDefaults setBool:sender.isOn forKey:keys[sender.tag]];
@@ -810,10 +814,6 @@ static void ACEWaitForNativeLiveSources(id owner, NSUInteger attempt) {
     if (!ACEEnabled(kACENicknameReflowKey)) return;
     __weak id weakElement = self;
     dispatch_async(dispatch_get_main_queue(), ^{ ACEApplyNicknameFollowerOffset(weakElement); });
-}
-- (void)recommendOffsetChanged:(UIStepper *)sender {
-    [NSUserDefaults.standardUserDefaults setDouble:sender.value forKey:kACERecommendOffsetKey];
-    [self.tableView reloadRowsAtIndexPaths:@[[NSIndexPath indexPathForRow:8 inSection:1]] withRowAnimation:UITableViewRowAnimationNone];
 }
 %end
 

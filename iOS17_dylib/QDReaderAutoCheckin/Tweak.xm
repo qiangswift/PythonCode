@@ -4,7 +4,6 @@
 #import <objc/runtime.h>
 #import <objc/message.h>
 #import <dlfcn.h>
-#import <mach-o/dyld.h>
 
 static NSString *const QDRTargetBundle = @"m.qidian.QDReaderAppStore";
 static NSString *const QDREnterpriseBundle = @"m.qidian.QDReaderQiYe";
@@ -15,9 +14,10 @@ static NSString *const QDRLastCompletedKey = @"verifiedLastCompletedDateV2";
 static const void *QDRShelfCollapseInFlightKey = &QDRShelfCollapseInFlightKey;
 
 @interface QDRShelfViewController : UIViewController
+- (BOOL)isBgOpen;
+- (void)setIsBgOpen:(BOOL)open;
+- (void)rebuildLayout;
 @end
-
-extern "C" void QDRInvokeShelfLayout(void *function, id controller, BOOL expanded);
 
 static NSString *QDRLogPath(void) {
     NSString *documents = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES).firstObject;
@@ -646,29 +646,30 @@ static id QDRShelfControllerForView(UIView *view) {
     return nil;
 }
 
-static void QDRForceShelfCollapsedLayout(id controller) {
+static void QDRApplyShelfCollapsedLayout(id controller) {
     if (!controller) {
-        QDRLog(@"bookshelf internal collapse unavailable controller=nil");
+        QDRLog(@"bookshelf native collapse unavailable controller=nil");
         return;
     }
-    Ivar stateIvar = class_getInstanceVariable(object_getClass(controller), "isBgOpen");
-    if (!stateIvar) {
-        QDRLog(@"bookshelf internal collapse unavailable isBgOpen=nil");
+    SEL stateSelector = @selector(isBgOpen);
+    SEL setterSelector = @selector(setIsBgOpen:);
+    SEL rebuildSelector = @selector(rebuildLayout);
+    if (![controller respondsToSelector:setterSelector] || ![controller respondsToSelector:rebuildSelector]) {
+        QDRLog(@"bookshelf native collapse unavailable controller=%@ setter=%d rebuild=%d",
+               NSStringFromClass([controller class]), [controller respondsToSelector:setterSelector],
+               [controller respondsToSelector:rebuildSelector]);
         return;
     }
-    ptrdiff_t stateOffset = ivar_getOffset(stateIvar);
-    uint8_t *state = (uint8_t *)(__bridge void *)controller + stateOffset;
-    BOOL before = *state != 0;
-    // The native function returns immediately when its input equals the stale
-    // controller flag.  The app can display the expanded artwork while this
-    // flag is false, so normalize it to true before requesting collapsed=false.
-    *state = 1;
-    const struct mach_header *header = _dyld_get_image_header(0);
-    void *layoutFunction = header ? (void *)((uintptr_t)header + 0x8d7ef8) : NULL;
-    if (layoutFunction) QDRInvokeShelfLayout(layoutFunction, controller, NO);
-    BOOL after = *state != 0;
-    QDRLog(@"bookshelf internal collapsed layout invoked function=0x8d7ef8 stateOffset=0x%tx before=%d after=%d",
-           stateOffset, before, after);
+    BOOL before = [controller respondsToSelector:stateSelector]
+        ? ((BOOL (*)(id, SEL))objc_msgSend)(controller, stateSelector) : NO;
+    ((void (*)(id, SEL, BOOL))objc_msgSend)(controller, setterSelector, NO);
+    ((void (*)(id, SEL))objc_msgSend)(controller, rebuildSelector);
+    [((UIViewController *)controller).view setNeedsLayout];
+    [((UIViewController *)controller).view layoutIfNeeded];
+    BOOL after = [controller respondsToSelector:stateSelector]
+        ? ((BOOL (*)(id, SEL))objc_msgSend)(controller, stateSelector) : NO;
+    QDRLog(@"bookshelf native collapsed layout applied controller=%@ before=%d after=%d",
+           NSStringFromClass([controller class]), before, after);
 }
 
 static void QDRCollapseLeadReadHeader(id header, NSUInteger attempt) {
@@ -679,12 +680,16 @@ static void QDRCollapseLeadReadHeader(id header, NSUInteger attempt) {
         ptrdiff_t handlerOffset = -1;
         BOOL hasShowing = QDRReadSwiftBoolIvar(header, "isAdBgShowing", &showing, &showingOffset);
         BOOL handlerReady = QDRSwiftClosureReady(header, "adFoldHandler", &handlerOffset);
-        if (hasShowing && !showing) return;
+        id shelfController = QDRShelfControllerForView(header);
+        if (hasShowing && !showing) {
+            QDRApplyShelfCollapsedLayout(shelfController);
+            return;
+        }
         if (hasShowing && showing && handlerReady && [header respondsToSelector:@selector(foldBtnClicked)]) {
             if (objc_getAssociatedObject(header, QDRShelfCollapseInFlightKey)) return;
             objc_setAssociatedObject(header, QDRShelfCollapseInFlightKey, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
             ((void (*)(id, SEL))objc_msgSend)(header, @selector(foldBtnClicked));
-            QDRForceShelfCollapsedLayout(QDRShelfControllerForView(header));
+            QDRApplyShelfCollapsedLayout(shelfController);
             QDRLog(@"bookshelf native lead-read fold invoked showingOffset=0x%tx handlerOffset=0x%tx attempt=%lu",
                    showingOffset, handlerOffset, (unsigned long)attempt);
             dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
@@ -718,11 +723,13 @@ static void QDRCollapseLeadReadHeadersInView(UIView *view) {
 %hook QDRShelfViewController
 - (void)viewDidAppear:(BOOL)animated {
     %orig;
+    QDRApplyShelfCollapsedLayout(self);
     QDRCollapseLeadReadHeadersInView(((UIViewController *)self).view);
 }
 - (void)enterForeground {
     %orig;
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.35 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        QDRApplyShelfCollapsedLayout(self);
         QDRCollapseLeadReadHeadersInView(((UIViewController *)self).view);
     });
 }
@@ -733,7 +740,7 @@ static void QDRCollapseLeadReadHeadersInView(UIView *view) {
 %ctor {
     NSString *bundle = NSBundle.mainBundle.bundleIdentifier;
     if ([bundle isEqualToString:QDRTargetBundle] || [bundle isEqualToString:QDREnterpriseBundle]) {
-        QDRLog(@"loaded version=1.4.5 bundle=%@", bundle);
+        QDRLog(@"loaded version=1.4.6 bundle=%@", bundle);
         %init;
         Class shelfVC = objc_getClass("_TtC16QDReaderAppStore25QDBookShelfViewController");
         Class shelfHeader = objc_getClass("_TtC16QDReaderAppStore25QDBookShelfLeadReadHeader");

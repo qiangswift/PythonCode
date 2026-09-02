@@ -4,6 +4,7 @@
 #import <objc/runtime.h>
 #import <objc/message.h>
 #import <dlfcn.h>
+#import <mach-o/dyld.h>
 
 static NSString *const QDRTargetBundle = @"m.qidian.QDReaderAppStore";
 static NSString *const QDREnterpriseBundle = @"m.qidian.QDReaderQiYe";

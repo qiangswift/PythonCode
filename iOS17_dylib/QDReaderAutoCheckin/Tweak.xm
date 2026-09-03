@@ -783,7 +783,14 @@ static UIImage *QDRShelfCheckinImage(void) {
             NSString *directory = [[[NSString alloc] initWithUTF8String:info.dli_fname] stringByDeletingLastPathComponent];
             path = [directory stringByAppendingPathComponent:@"QDReaderAutoCheckin/checkin.png"];
         }
-        image = [[UIImage imageWithContentsOfFile:path] imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate];
+        UIImage *source = [UIImage imageWithContentsOfFile:path];
+        if (source) {
+            CGSize size = CGSizeMake(26, 26);
+            UIGraphicsBeginImageContextWithOptions(size, NO, UIScreen.mainScreen.scale);
+            [source drawInRect:(CGRect){CGPointZero, size}];
+            image = [[UIGraphicsGetImageFromCurrentImageContext() imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate] copy];
+            UIGraphicsEndImageContext();
+        }
     });
     return image;
 }
@@ -818,7 +825,6 @@ static void QDRInstallShelfCheckinControls(QDRShelfNavView *navigationView) {
     button.backgroundColor = UIColor.tertiarySystemFillColor;
     button.layer.cornerRadius = 20;
     button.imageView.contentMode = UIViewContentModeScaleAspectFit;
-    button.contentEdgeInsets = UIEdgeInsetsMake(7, 7, 7, 7);
     [button setImage:QDRShelfCheckinImage() forState:UIControlStateNormal];
     [button.widthAnchor constraintEqualToConstant:40].active = YES;
     [button.heightAnchor constraintEqualToConstant:40].active = YES;

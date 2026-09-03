@@ -12,13 +12,68 @@ static NSString *const QDRPrefsSuite = @"com.swiftss.qdreaderautocheckin.runtime
 // Do not trust the legacy completion key: versions through 1.2.7 wrote it
 // when JavaScript merely called $done(), even if no task request was made.
 static NSString *const QDRLastCompletedKey = @"verifiedLastCompletedDateV2";
+static NSString *const QDRChapterCardCountKey = @"chapterCardCount";
+static NSString *const QDRChapterCardCountDidChange = @"com.swiftss.qdreaderautocheckin.chapter-card-count-changed";
 static const void *QDRShelfCollapseInFlightKey = &QDRShelfCollapseInFlightKey;
+static const void *QDRShelfCheckinButtonKey = &QDRShelfCheckinButtonKey;
+static const void *QDRShelfChapterCardLabelKey = &QDRShelfChapterCardLabelKey;
 
 @interface QDRShelfViewController : UIViewController
 - (BOOL)isBgOpen;
 - (void)setIsBgOpen:(BOOL)open;
 - (void)rebuildLayout;
 @end
+
+@interface QDRShelfNavView : UIView
+- (UIStackView *)rightButtonContainer;
+@end
+
+@interface QDRChapterCardObject : NSObject
+- (void)setTotalCount:(NSInteger)count;
+@end
+
+static NSUserDefaults *QDRRuntimeStore(void) {
+    return [[NSUserDefaults alloc] initWithSuiteName:QDRPrefsSuite];
+}
+
+static void QDRPublishChapterCardCount(NSInteger count) {
+    if (count < 0) return;
+    NSUserDefaults *store = QDRRuntimeStore();
+    if ([store objectForKey:QDRChapterCardCountKey] && [store integerForKey:QDRChapterCardCountKey] == count) return;
+    [store setInteger:count forKey:QDRChapterCardCountKey];
+    [store synchronize];
+    dispatch_async(dispatch_get_main_queue(), ^{
+        [NSNotificationCenter.defaultCenter postNotificationName:QDRChapterCardCountDidChange object:nil];
+    });
+}
+
+static void QDRFindChapterCardCount(id object, NSString *context) {
+    if ([object isKindOfClass:NSDictionary.class]) {
+        NSDictionary *dictionary = object;
+        NSString *lowerContext = context.lowercaseString ?: @"";
+        BOOL cardContext = [lowerContext containsString:@"chaptercard"] ||
+                           [lowerContext containsString:@"chapter_card"] ||
+                           dictionary[@"CanUseChapterCard"] != nil || dictionary[@"canUseChapterCard"] != nil;
+        for (id rawKey in dictionary) {
+            NSString *key = [[rawKey description] lowercaseString];
+            id value = dictionary[rawKey];
+            BOOL countKey = [key isEqualToString:@"totalcount"] || [key isEqualToString:@"total_count"] ||
+                            [key isEqualToString:@"chaptercardcount"] || [key isEqualToString:@"chapter_card_count"];
+            if (cardContext && countKey && [value respondsToSelector:@selector(integerValue)]) {
+                QDRPublishChapterCardCount([value integerValue]);
+            }
+            QDRFindChapterCardCount(value, [NSString stringWithFormat:@"%@/%@", lowerContext, key]);
+        }
+    } else if ([object isKindOfClass:NSArray.class]) {
+        for (id value in object) QDRFindChapterCardCount(value, context);
+    }
+}
+
+static void QDRInspectChapterCardResponse(NSData *data) {
+    if (!data.length) return;
+    id object = [NSJSONSerialization JSONObjectWithData:data options:0 error:nil];
+    if (object) QDRFindChapterCardCount(object, @"");
+}
 
 static NSString *QDRLogPath(void) {
     NSString *documents = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES).firstObject;
@@ -109,6 +164,7 @@ static void QDRScheduleSplashSkip(NSUInteger attempt) {
 - (void)captureRequest:(NSURLRequest *)request;
 - (void)startForWelfareEntry;
 - (void)startForWelfareEntry:(NSString *)source;
+- (void)startFromShelfButton:(UIButton *)sender;
 - (void)presentMessage:(NSString *)message title:(NSString *)title;
 - (void)presentMessage:(NSString *)message title:(NSString *)title completion:(dispatch_block_t)completion;
 @end
@@ -213,6 +269,10 @@ static void QDRScheduleSplashSkip(NSUInteger attempt) {
 
 - (void)startForWelfareEntry {
     [self startForWelfareEntry:@"legacy-entry"];
+}
+
+- (void)startFromShelfButton:(UIButton *)sender {
+    [self startForWelfareEntry:@"bookshelf-button"];
 }
 
 - (NSString *)todayKey {
@@ -438,6 +498,7 @@ static void QDRScheduleSplashSkip(NSUInteger attempt) {
         id body = options[@"body"];
         if ([body isKindOfClass:NSString.class]) request.HTTPBody = [body dataUsingEncoding:NSUTF8StringEncoding];
         [[[NSURLSession sharedSession] dataTaskWithRequest:request completionHandler:^(NSData *bodyData, NSURLResponse *response, NSError *networkError) {
+            if (!networkError) QDRInspectChapterCardResponse(bodyData);
             dispatch_async(weakSelf.queue, ^{
                 NSMutableDictionary *result = [NSMutableDictionary dictionary];
                 NSInteger statusCode = 0;
@@ -712,6 +773,68 @@ static void QDRCollapseLeadReadHeadersInView(UIView *view) {
 }
 %end
 
+static UIImage *QDRShelfCheckinImage(void) {
+    static UIImage *image;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        Dl_info info = {0};
+        NSString *path = nil;
+        if (dladdr((const void *)&QDRShelfCheckinImage, &info) && info.dli_fname) {
+            NSString *directory = [[[NSString alloc] initWithUTF8String:info.dli_fname] stringByDeletingLastPathComponent];
+            path = [directory stringByAppendingPathComponent:@"QDReaderAutoCheckin/checkin.png"];
+        }
+        image = [[UIImage imageWithContentsOfFile:path] imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate];
+    });
+    return image;
+}
+
+static void QDRUpdateShelfChapterCardLabel(QDRShelfNavView *navigationView) {
+    UILabel *label = objc_getAssociatedObject(navigationView, QDRShelfChapterCardLabelKey);
+    if (!label) return;
+    NSUserDefaults *store = QDRRuntimeStore();
+    label.text = [store objectForKey:QDRChapterCardCountKey]
+        ? [NSString stringWithFormat:@"章节卡 %ld", (long)[store integerForKey:QDRChapterCardCountKey]]
+        : @"章节卡 --";
+}
+
+static void QDRInstallShelfCheckinControls(QDRShelfNavView *navigationView) {
+    if (objc_getAssociatedObject(navigationView, QDRShelfCheckinButtonKey)) return;
+    UIStackView *stack = [navigationView respondsToSelector:@selector(rightButtonContainer)]
+        ? navigationView.rightButtonContainer : nil;
+    if (![stack isKindOfClass:UIStackView.class]) return;
+
+    UILabel *label = [UILabel new];
+    label.font = [UIFont systemFontOfSize:12 weight:UIFontWeightMedium];
+    label.textColor = UIColor.labelColor;
+    label.textAlignment = NSTextAlignmentCenter;
+    label.adjustsFontSizeToFitWidth = YES;
+    label.minimumScaleFactor = 0.75;
+    [label.widthAnchor constraintGreaterThanOrEqualToConstant:58].active = YES;
+    [label.heightAnchor constraintEqualToConstant:40].active = YES;
+
+    UIButton *button = [UIButton buttonWithType:UIButtonTypeSystem];
+    button.accessibilityLabel = @"签到";
+    button.tintColor = UIColor.labelColor;
+    button.backgroundColor = UIColor.tertiarySystemFillColor;
+    button.layer.cornerRadius = 20;
+    button.imageView.contentMode = UIViewContentModeScaleAspectFit;
+    button.contentEdgeInsets = UIEdgeInsetsMake(7, 7, 7, 7);
+    [button setImage:QDRShelfCheckinImage() forState:UIControlStateNormal];
+    [button.widthAnchor constraintEqualToConstant:40].active = YES;
+    [button.heightAnchor constraintEqualToConstant:40].active = YES;
+    [button addTarget:[QDRAutoRunner shared] action:@selector(startFromShelfButton:) forControlEvents:UIControlEventTouchUpInside];
+
+    [stack insertArrangedSubview:label atIndex:0];
+    [stack insertArrangedSubview:button atIndex:MIN((NSUInteger)1, stack.arrangedSubviews.count)];
+    objc_setAssociatedObject(navigationView, QDRShelfChapterCardLabelKey, label, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    objc_setAssociatedObject(navigationView, QDRShelfCheckinButtonKey, button, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    [NSNotificationCenter.defaultCenter addObserver:navigationView
+                                           selector:@selector(qdr_updateChapterCardCount)
+                                               name:QDRChapterCardCountDidChange
+                                             object:nil];
+    QDRUpdateShelfChapterCardLabel(navigationView);
+}
+
 %group QDRShelfPromotionHooks
 
 %hook QDRShelfLeadReadHeader
@@ -736,21 +859,51 @@ static void QDRCollapseLeadReadHeadersInView(UIView *view) {
 }
 %end
 
+%hook QDRShelfNavView
+- (void)layoutSubviews {
+    %orig;
+    QDRInstallShelfCheckinControls(self);
+}
+
+%new
+- (void)qdr_updateChapterCardCount {
+    QDRUpdateShelfChapterCardLabel(self);
+}
+
+- (void)dealloc {
+    [NSNotificationCenter.defaultCenter removeObserver:self name:QDRChapterCardCountDidChange object:nil];
+    %orig;
+}
+%end
+
+%end
+
+%group QDRChapterCardHooks
+%hook QDRChapterCardObject
+- (void)setTotalCount:(NSInteger)count {
+    %orig;
+    QDRPublishChapterCardCount(count);
+}
+%end
 %end
 
 %ctor {
     NSString *bundle = NSBundle.mainBundle.bundleIdentifier;
     if ([bundle isEqualToString:QDRTargetBundle] || [bundle isEqualToString:QDREnterpriseBundle]) {
-        QDRLog(@"loaded version=1.4.6 bundle=%@", bundle);
+        QDRLog(@"loaded version=1.5.0 bundle=%@", bundle);
         %init;
         Class shelfVC = objc_getClass("_TtC16QDReaderAppStore25QDBookShelfViewController");
         Class shelfHeader = objc_getClass("_TtC16QDReaderAppStore25QDBookShelfLeadReadHeader");
-        if (shelfVC && shelfHeader) {
+        Class shelfNav = objc_getClass("_TtC16QDReaderAppStore18QDBookShelfNavView");
+        if (shelfVC && shelfHeader && shelfNav) {
             %init(QDRShelfPromotionHooks,
                   QDRShelfViewController = shelfVC,
-                  QDRShelfLeadReadHeader = shelfHeader);
+                  QDRShelfLeadReadHeader = shelfHeader,
+                  QDRShelfNavView = shelfNav);
         } else {
-            QDRLog(@"bookshelf fold hook unavailable vc=%d header=%d", shelfVC != Nil, shelfHeader != Nil);
+            QDRLog(@"bookshelf hook unavailable vc=%d header=%d nav=%d", shelfVC != Nil, shelfHeader != Nil, shelfNav != Nil);
         }
+        Class chapterCard = objc_getClass("_TtC16QDReaderAppStore15ChapterCardObjc");
+        if (chapterCard) %init(QDRChapterCardHooks, QDRChapterCardObject = chapterCard);
     }
 }

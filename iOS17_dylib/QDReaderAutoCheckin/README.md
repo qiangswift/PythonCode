@@ -8,6 +8,11 @@ the Welfare Center view controller: leaving the page does not cancel it. A new
 entry while a run is active is ignored; completion is shown as an in-app alert.
 The home-page **Check in / Claim benefits** action URL is also recognized.
 
+The bookshelf navigation bar adds a native-style chapter-card balance and a
+check-in icon immediately before the existing search button. Tapping the icon
+runs the same verified check-in pipeline directly. The balance is refreshed
+from both QDReader's chapter-card model and matching API responses.
+
 The tweak shows a start alert and a final alert. Diagnostic output is stored in
 the app sandbox at `Documents/QDReaderAutoCheckin.log`. After a completed run,
 the current date is recorded and later entries on the same day are skipped.

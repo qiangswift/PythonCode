@@ -151,7 +151,6 @@ static void QDRScheduleSplashSkip(NSUInteger attempt) {
 - (void)startForWelfareEntry;
 - (void)startForWelfareEntry:(NSString *)source;
 - (void)startFromShelfButton:(UIButton *)sender;
-- (void)refreshChapterCardFromMineAPI;
 - (void)presentMessage:(NSString *)message title:(NSString *)title;
 - (void)presentMessage:(NSString *)message title:(NSString *)title completion:(dispatch_block_t)completion;
 @end
@@ -260,52 +259,6 @@ static void QDRScheduleSplashSkip(NSUInteger attempt) {
 
 - (void)startFromShelfButton:(UIButton *)sender {
     [self startForWelfareEntry:@"bookshelf-button"];
-}
-
-- (void)refreshChapterCardFromMineAPI {
-    static NSDate *lastRefresh;
-    @synchronized (QDRAutoRunner.class) {
-        if (lastRefresh && -lastRefresh.timeIntervalSinceNow < 30.0) return;
-        lastRefresh = NSDate.date;
-    }
-    NSURL *url = [NSURL URLWithString:@"https://druidv6.if.qidian.com/argus/api/v3/user/getaccountpage"];
-    NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:url];
-    request.timeoutInterval = 20;
-
-    NSMutableArray<NSString *> *pairs = [NSMutableArray array];
-    for (NSHTTPCookie *cookie in NSHTTPCookieStorage.sharedHTTPCookieStorage.cookies) {
-        NSString *domain = cookie.domain.lowercaseString;
-        if ([domain containsString:@"qidian"] || [domain containsString:@"qdmm"] || [domain containsString:@"yuewen"]) {
-            [pairs addObject:[NSString stringWithFormat:@"%@=%@", cookie.name, cookie.value]];
-        }
-    }
-    if (pairs.count) [request setValue:[pairs componentsJoinedByString:@"; "] forHTTPHeaderField:@"Cookie"];
-
-    Class headerClass = NSClassFromString(@"QDHeaderService");
-    id headerService = headerClass ? [headerClass new] : nil;
-    NSString *headerKey = @"QDHeader";
-    NSString *headerValue = nil;
-    if ([headerService respondsToSelector:@selector(getQDHeaderKey)]) {
-        headerKey = ((id (*)(id, SEL))objc_msgSend)(headerService, @selector(getQDHeaderKey)) ?: headerKey;
-    }
-    if ([headerService respondsToSelector:@selector(getQDHeaderValue)]) {
-        headerValue = ((id (*)(id, SEL))objc_msgSend)(headerService, @selector(getQDHeaderValue));
-    }
-    if (headerValue.length) [request setValue:headerValue forHTTPHeaderField:headerKey];
-
-    [[[NSURLSession sharedSession] dataTaskWithRequest:request completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
-        NSInteger status = [response isKindOfClass:NSHTTPURLResponse.class] ? ((NSHTTPURLResponse *)response).statusCode : 0;
-        id object = data.length ? [NSJSONSerialization JSONObjectWithData:data options:0 error:nil] : nil;
-        NSInteger count = 0;
-        if (!error && status >= 200 && status < 300 && QDRReadMineChapterCardValue(object, &count)) {
-            QDRPublishChapterCardCount(count);
-            QDRLog(@"chapter card refreshed from mine API count=%ld", (long)count);
-        } else {
-            QDRLog(@"chapter card mine API failed status=%ld error=%@ field=%d",
-                   (long)status, error.localizedDescription ?: @"<none>",
-                   QDRReadMineChapterCardValue(object, NULL));
-        }
-    }] resume];
 }
 
 - (NSString *)todayKey {
@@ -619,6 +572,30 @@ static void QDRObserveTask(NSURLSessionTask *task) {
         [[QDRAutoRunner shared] captureRequest:request];
     }
 }
+
+%hook NSURLSession
+- (NSURLSessionDataTask *)dataTaskWithRequest:(NSURLRequest *)request
+                            completionHandler:(void (^)(NSData *, NSURLResponse *, NSError *))completionHandler {
+    NSString *URLString = request.URL.absoluteString.lowercaseString;
+    if ([URLString containsString:@"/argus/api/v3/user/getaccountpage"] && completionHandler) {
+        void (^wrappedCompletion)(NSData *, NSURLResponse *, NSError *) =
+        ^(NSData *data, NSURLResponse *response, NSError *error) {
+            NSInteger count = 0;
+            id object = data.length ? [NSJSONSerialization JSONObjectWithData:data options:0 error:nil] : nil;
+            if (!error && QDRReadMineChapterCardValue(object, &count)) {
+                QDRPublishChapterCardCount(count);
+                QDRLog(@"chapter card captured from native mine response count=%ld", (long)count);
+            } else {
+                QDRLog(@"native mine response contained no chapter-card value error=%@",
+                       error.localizedDescription ?: @"<none>");
+            }
+            completionHandler(data, response, error);
+        };
+        return %orig(request, wrappedCompletion);
+    }
+    return %orig;
+}
+%end
 
 %hook NSURLSessionTask
 - (void)resume {
@@ -960,8 +937,10 @@ static void QDRInstallShelfCheckinControls(QDRShelfNavView *navigationView) {
     button.imageView.contentMode = UIViewContentModeScaleAspectFit;
     [button setImage:QDRShelfCheckinImage() forState:UIControlStateNormal];
     if (searchItem) {
-        [button.widthAnchor constraintEqualToAnchor:searchItem.widthAnchor].active = YES;
-        [button.heightAnchor constraintEqualToAnchor:searchItem.heightAnchor].active = YES;
+        CGFloat diameter = MIN(searchItem.bounds.size.width, searchItem.bounds.size.height) - 4.0;
+        if (diameter < 28.0) diameter = 36.0;
+        [button.widthAnchor constraintEqualToConstant:diameter].active = YES;
+        [button.heightAnchor constraintEqualToConstant:diameter].active = YES;
     }
     [button addTarget:[QDRAutoRunner shared] action:@selector(startFromShelfButton:) forControlEvents:UIControlEventTouchUpInside];
 
@@ -975,7 +954,6 @@ static void QDRInstallShelfCheckinControls(QDRShelfNavView *navigationView) {
                                              object:nil];
     QDRUpdateShelfChapterCardLabel(navigationView);
     QDRLayoutShelfCheckinControls(navigationView);
-    [[QDRAutoRunner shared] refreshChapterCardFromMineAPI];
     QDRLog(@"bookshelf checkin UI installed stack=%@ originalItems=%lu icon=%d",
            NSStringFromClass(stack.class), (unsigned long)(stack.arrangedSubviews.count - 1), QDRShelfCheckinImage() != nil);
 }
@@ -996,7 +974,6 @@ static void QDRInstallShelfCheckinControls(QDRShelfNavView *navigationView) {
     QDRCollapseLeadReadHeadersInView(((UIViewController *)self).view);
     QDRShelfNavView *navigationView = QDRFindShelfNavigationView(((UIViewController *)self).view);
     if (navigationView) QDRInstallShelfCheckinControls(navigationView);
-    [[QDRAutoRunner shared] refreshChapterCardFromMineAPI];
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.3 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         QDRShelfNavView *delayedNavigationView = QDRFindShelfNavigationView(((UIViewController *)self).view);
         if (delayedNavigationView) QDRInstallShelfCheckinControls(delayedNavigationView);
@@ -1008,7 +985,6 @@ static void QDRInstallShelfCheckinControls(QDRShelfNavView *navigationView) {
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.35 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         QDRApplyShelfCollapsedLayout(self);
         QDRCollapseLeadReadHeadersInView(((UIViewController *)self).view);
-        [[QDRAutoRunner shared] refreshChapterCardFromMineAPI];
     });
 }
 %end
@@ -1041,7 +1017,7 @@ static void QDRInstallShelfCheckinControls(QDRShelfNavView *navigationView) {
 %ctor {
     NSString *bundle = NSBundle.mainBundle.bundleIdentifier;
     if ([bundle isEqualToString:QDRTargetBundle] || [bundle isEqualToString:QDREnterpriseBundle]) {
-        QDRLog(@"loaded version=1.5.4 bundle=%@", bundle);
+        QDRLog(@"loaded version=1.5.5 bundle=%@", bundle);
         %init;
         Class shelfVC = objc_getClass("_TtC16QDReaderAppStore25QDBookShelfViewController");
         Class shelfHeader = objc_getClass("_TtC16QDReaderAppStore25QDBookShelfLeadReadHeader");

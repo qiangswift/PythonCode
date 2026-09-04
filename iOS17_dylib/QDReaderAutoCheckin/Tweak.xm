@@ -17,6 +17,7 @@ static NSString *const QDRChapterCardCountDidChange = @"com.swiftss.qdreaderauto
 static const void *QDRShelfCollapseInFlightKey = &QDRShelfCollapseInFlightKey;
 static const void *QDRShelfCheckinButtonKey = &QDRShelfCheckinButtonKey;
 static const void *QDRShelfChapterCardLabelKey = &QDRShelfChapterCardLabelKey;
+static void QDRLog(NSString *format, ...);
 
 @interface QDRShelfViewController : UIViewController
 - (BOOL)isBgOpen;

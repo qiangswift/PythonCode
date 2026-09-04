@@ -1,5 +1,17 @@
 # iOS17_dylib 项目交接
 
+## QDReaderAutoCheckin 1.5.7
+
+- The bookshelf game entry is removed from the native button stack and guarded
+  against later asynchronous reinsertion.
+- The check-in circle and glyph are smaller to match the neighboring search
+  control.
+- Chapter-card balance refresh mirrors QDReader's own signed
+  `/argus/api/v3/user/getaccountpage` request and publishes `ChapterCard`
+  immediately; the rendered Mine account cell remains only a fallback.
+- Only the RootHide package is requested for this release. Compilation and
+  on-device behavior must be reported separately.
+
 最后更新：2026-08-27
 
 ## 统一工作目录

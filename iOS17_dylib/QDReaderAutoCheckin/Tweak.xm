@@ -18,7 +18,14 @@ static NSString *const QDRChapterCardCountDidChange = @"com.swiftss.qdreaderauto
 static const void *QDRShelfCollapseInFlightKey = &QDRShelfCollapseInFlightKey;
 static const void *QDRShelfCheckinButtonKey = &QDRShelfCheckinButtonKey;
 static const void *QDRShelfChapterCardLabelKey = &QDRShelfChapterCardLabelKey;
+static const void *QDRShelfButtonStackKey = &QDRShelfButtonStackKey;
+static const void *QDRShelfSearchButtonKey = &QDRShelfSearchButtonKey;
+static const void *QDRShelfGameButtonKey = &QDRShelfGameButtonKey;
+static const void *QDRShelfMoreButtonKey = &QDRShelfMoreButtonKey;
+static const void *QDRChapterMirrorTaskKey = &QDRChapterMirrorTaskKey;
+static const void *QDRLatestAccountRequestKey = &QDRLatestAccountRequestKey;
 static void QDRLog(NSString *format, ...);
+static void QDRRefreshChapterCardFromCachedNativeRequest(void);
 
 @interface QDRShelfViewController : UIViewController
 - (BOOL)isBgOpen;
@@ -404,6 +411,7 @@ static void QDRScheduleSplashSkip(NSUInteger attempt) {
         if (verified) {
             [[self store] setObject:[self todayKey] forKey:QDRLastCompletedKey];
             [[self store] synchronize];
+            QDRRefreshChapterCardFromCachedNativeRequest();
             QDRLog(@"script run verified; requests=%lu success=%lu; daily completion recorded",
                    (unsigned long)self.runFetchStarted, (unsigned long)self.runHTTPSuccessCount);
         } else {
@@ -623,6 +631,30 @@ static void QDRObserveTask(NSURLSessionTask *task) {
     if ([request.URL.absoluteString.lowercaseString containsString:@"getlogininfo"]) {
         [[QDRAutoRunner shared] captureRequest:request];
     }
+    if ([request.URL.absoluteString.lowercaseString containsString:@"/argus/api/v3/user/getaccountpage"] &&
+        !objc_getAssociatedObject(task, QDRChapterMirrorTaskKey)) {
+        @synchronized (QDRAutoRunner.class) {
+            objc_setAssociatedObject(QDRAutoRunner.class, QDRLatestAccountRequestKey,
+                                     [request copy], OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        }
+        QDRRefreshChapterCardFromCachedNativeRequest();
+    }
+}
+
+static void QDRRefreshChapterCardFromCachedNativeRequest(void) {
+    NSURLRequest *request = objc_getAssociatedObject(QDRAutoRunner.class, QDRLatestAccountRequestKey);
+    if (!request.URL) return;
+    NSURLSessionDataTask *task = [NSURLSession.sharedSession dataTaskWithRequest:request
+                                                              completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
+        NSInteger count = 0;
+        id object = data.length ? [NSJSONSerialization JSONObjectWithData:data options:0 error:nil] : nil;
+        if (!error && QDRReadMineChapterCardValue(object, &count)) {
+            QDRPublishChapterCardCount(count);
+            QDRLog(@"chapter card refreshed from native account request count=%ld", (long)count);
+        }
+    }];
+    objc_setAssociatedObject(task, QDRChapterMirrorTaskKey, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    [task resume];
 }
 
 %hook NSURLSession
@@ -847,7 +879,7 @@ static UIImage *QDRShelfCheckinImage(void) {
         }
         UIImage *source = [UIImage imageWithContentsOfFile:path];
         if (source) {
-            CGSize size = CGSizeMake(26, 26);
+            CGSize size = CGSizeMake(22, 22);
             UIGraphicsBeginImageContextWithOptions(size, NO, UIScreen.mainScreen.scale);
             [source drawInRect:(CGRect){CGPointZero, size}];
             image = [[UIGraphicsGetImageFromCurrentImageContext() imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate] copy];
@@ -895,9 +927,14 @@ static void QDRLayoutShelfCheckinControls(QDRShelfNavView *navigationView) {
     UIStackView *stack = QDRShelfButtonStack(navigationView);
     if (!button || !label || !stack) return;
 
-    NSArray<UIView *> *items = stack.arrangedSubviews;
-    NSUInteger buttonIndex = [items indexOfObject:button];
-    UIView *searchItem = buttonIndex != NSNotFound && buttonIndex + 1 < items.count ? items[buttonIndex + 1] : nil;
+    UIView *searchItem = objc_getAssociatedObject(navigationView, QDRShelfSearchButtonKey);
+    UIView *gameItem = objc_getAssociatedObject(navigationView, QDRShelfGameButtonKey);
+    UIView *moreItem = objc_getAssociatedObject(navigationView, QDRShelfMoreButtonKey);
+    if (gameItem) {
+        gameItem.hidden = YES;
+        if ([stack.arrangedSubviews containsObject:gameItem]) [stack removeArrangedSubview:gameItem];
+        [gameItem removeFromSuperview];
+    }
     UIColor *foreground = searchItem ? QDRVisibleTintColorInView(searchItem) : nil;
     UIColor *background = searchItem ? QDRVisibleBackgroundColorInView(searchItem) : nil;
     button.tintColor = foreground ?: UIColor.labelColor;
@@ -906,10 +943,7 @@ static void QDRLayoutShelfCheckinControls(QDRShelfNavView *navigationView) {
         ? searchItem.layer.cornerRadius : MIN(button.bounds.size.width, button.bounds.size.height) * 0.5;
     label.textColor = foreground ?: UIColor.labelColor;
 
-    if (buttonIndex != NSNotFound && buttonIndex + 3 < items.count) {
-        UIView *gameItem = items[buttonIndex + 2];
-        UIView *moreItem = items[buttonIndex + 3];
-        gameItem.hidden = YES;
+    if (searchItem && moreItem) {
         CGRect searchFrame = [searchItem.superview convertRect:searchItem.frame toView:navigationView];
         CGRect moreFrame = [moreItem.superview convertRect:moreItem.frame toView:navigationView];
         CGRect target = CGRectUnion(searchFrame, moreFrame);
@@ -971,6 +1005,21 @@ static void QDRInstallShelfCheckinControls(QDRShelfNavView *navigationView) {
         return;
     }
 
+    NSArray<UIView *> *nativeItems = [stack.arrangedSubviews copy];
+    UIView *searchItem = nativeItems.count > 0 ? nativeItems[0] : nil;
+    UIView *gameItem = nativeItems.count > 1 ? nativeItems[1] : nil;
+    UIView *moreItem = nativeItems.count > 2 ? nativeItems.lastObject : nil;
+    objc_setAssociatedObject(stack, QDRShelfButtonStackKey, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    if (searchItem) objc_setAssociatedObject(navigationView, QDRShelfSearchButtonKey, searchItem, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    if (gameItem) {
+        objc_setAssociatedObject(gameItem, QDRShelfGameButtonKey, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        objc_setAssociatedObject(navigationView, QDRShelfGameButtonKey, gameItem, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        gameItem.hidden = YES;
+        [stack removeArrangedSubview:gameItem];
+        [gameItem removeFromSuperview];
+    }
+    if (moreItem) objc_setAssociatedObject(navigationView, QDRShelfMoreButtonKey, moreItem, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+
     UILabel *label = [UILabel new];
     label.font = [UIFont systemFontOfSize:13 weight:UIFontWeightSemibold];
     label.textColor = UIColor.labelColor;
@@ -983,15 +1032,14 @@ static void QDRInstallShelfCheckinControls(QDRShelfNavView *navigationView) {
     label.layer.shadowRadius = 1;
     label.layer.shadowOffset = CGSizeMake(0, 1);
 
-    UIView *searchItem = stack.arrangedSubviews.firstObject;
     UIButton *button = [UIButton buttonWithType:UIButtonTypeSystem];
     button.accessibilityLabel = @"签到";
     button.clipsToBounds = YES;
     button.imageView.contentMode = UIViewContentModeScaleAspectFit;
     [button setImage:QDRShelfCheckinImage() forState:UIControlStateNormal];
     if (searchItem) {
-        CGFloat diameter = MIN(searchItem.bounds.size.width, searchItem.bounds.size.height) - 4.0;
-        if (diameter < 28.0) diameter = 36.0;
+        CGFloat diameter = MIN(searchItem.bounds.size.width, searchItem.bounds.size.height) - 8.0;
+        if (diameter < 28.0) diameter = 34.0;
         [button.widthAnchor constraintEqualToConstant:diameter].active = YES;
         [button.heightAnchor constraintEqualToConstant:diameter].active = YES;
     }
@@ -1008,8 +1056,22 @@ static void QDRInstallShelfCheckinControls(QDRShelfNavView *navigationView) {
     QDRUpdateShelfChapterCardLabel(navigationView);
     QDRLayoutShelfCheckinControls(navigationView);
     QDRLog(@"bookshelf checkin UI installed stack=%@ originalItems=%lu icon=%d",
-           NSStringFromClass(stack.class), (unsigned long)(stack.arrangedSubviews.count - 1), QDRShelfCheckinImage() != nil);
+           NSStringFromClass(stack.class), (unsigned long)nativeItems.count, QDRShelfCheckinImage() != nil);
 }
+
+%hook UIStackView
+- (void)addArrangedSubview:(UIView *)view {
+    if (objc_getAssociatedObject(self, QDRShelfButtonStackKey) &&
+        objc_getAssociatedObject(view, QDRShelfGameButtonKey)) return;
+    %orig;
+}
+
+- (void)insertArrangedSubview:(UIView *)view atIndex:(NSUInteger)stackIndex {
+    if (objc_getAssociatedObject(self, QDRShelfButtonStackKey) &&
+        objc_getAssociatedObject(view, QDRShelfGameButtonKey)) return;
+    %orig;
+}
+%end
 
 %group QDRShelfPromotionHooks
 
@@ -1026,7 +1088,10 @@ static void QDRInstallShelfCheckinControls(QDRShelfNavView *navigationView) {
     QDRApplyShelfCollapsedLayout(self);
     QDRCollapseLeadReadHeadersInView(((UIViewController *)self).view);
     QDRShelfNavView *navigationView = QDRFindShelfNavigationView(((UIViewController *)self).view);
-    if (navigationView) QDRInstallShelfCheckinControls(navigationView);
+    if (navigationView) {
+        QDRInstallShelfCheckinControls(navigationView);
+        QDRRefreshChapterCardFromCachedNativeRequest();
+    }
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.3 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         QDRShelfNavView *delayedNavigationView = QDRFindShelfNavigationView(((UIViewController *)self).view);
         if (delayedNavigationView) QDRInstallShelfCheckinControls(delayedNavigationView);
@@ -1079,7 +1144,7 @@ static void QDRInstallShelfCheckinControls(QDRShelfNavView *navigationView) {
 %ctor {
     NSString *bundle = NSBundle.mainBundle.bundleIdentifier;
     if ([bundle isEqualToString:QDRTargetBundle] || [bundle isEqualToString:QDREnterpriseBundle]) {
-        QDRLog(@"loaded version=1.5.6 bundle=%@", bundle);
+        QDRLog(@"loaded version=1.5.7 bundle=%@", bundle);
         %init;
         Class shelfVC = objc_getClass("_TtC16QDReaderAppStore25QDBookShelfViewController");
         Class shelfHeader = objc_getClass("_TtC16QDReaderAppStore25QDBookShelfLeadReadHeader");

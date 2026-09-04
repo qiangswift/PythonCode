@@ -10,11 +10,10 @@ The home-page **Check in / Claim benefits** action URL is also recognized.
 
 The bookshelf navigation bar adds a native-style chapter-card balance and a
 check-in icon immediately before the existing search button. Tapping the icon
-runs the same verified check-in pipeline directly. The balance is refreshed
-from QDReader's own signed **Mine** account request and its `ChapterCard`
-response field. The tweak mirrors a request already created by QDReader, so it
-neither synthesizes login headers nor stores account credentials. The rendered
-Mine account cell remains a display-only fallback.
+runs the same verified check-in pipeline directly. The balance is read only
+from QDReader's in-memory `QDMineViewModel.userInfoModel` and
+`QDMineAccountCellModel.accountInfo` values. It never sends a balance request.
+The rendered Mine account cell remains a display-only fallback.
 
 The tweak shows a start alert and a final alert. Diagnostic output is stored in
 the app sandbox at `Documents/QDReaderAutoCheckin.log`. After a completed run,

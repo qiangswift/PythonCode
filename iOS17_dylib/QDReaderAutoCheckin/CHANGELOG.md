@@ -6,8 +6,8 @@
   to add the same native button back to the navigation stack.
 - Match the check-in control more closely to the native search button by
   reducing both its visible circle and icon.
-- Refresh the chapter-card balance immediately from QDReader's own signed
-  account request, including immediately after a verified check-in run.
+- Refresh the chapter-card balance immediately when QDReader assigns its
+  in-memory Mine/account models, without issuing any balance request.
 
 ## 1.5.6
 

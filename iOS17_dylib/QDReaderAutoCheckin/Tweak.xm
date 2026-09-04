@@ -6,6 +6,7 @@
 #import <dlfcn.h>
 #import <mach-o/dyld.h>
 #import <math.h>
+#import <string.h>
 
 static NSString *const QDRTargetBundle = @"m.qidian.QDReaderAppStore";
 static NSString *const QDREnterpriseBundle = @"m.qidian.QDReaderQiYe";
@@ -22,10 +23,7 @@ static const void *QDRShelfButtonStackKey = &QDRShelfButtonStackKey;
 static const void *QDRShelfSearchButtonKey = &QDRShelfSearchButtonKey;
 static const void *QDRShelfGameButtonKey = &QDRShelfGameButtonKey;
 static const void *QDRShelfMoreButtonKey = &QDRShelfMoreButtonKey;
-static const void *QDRChapterMirrorTaskKey = &QDRChapterMirrorTaskKey;
-static const void *QDRLatestAccountRequestKey = &QDRLatestAccountRequestKey;
 static void QDRLog(NSString *format, ...);
-static void QDRRefreshChapterCardFromCachedNativeRequest(void);
 
 @interface QDRShelfViewController : UIViewController
 - (BOOL)isBgOpen;
@@ -38,6 +36,14 @@ static void QDRRefreshChapterCardFromCachedNativeRequest(void);
 @end
 
 @interface QDRMineAccountCell : UITableViewCell
+@end
+
+@interface QDRMineViewModel : NSObject
+- (void)setUserInfoModel:(id)model;
+@end
+
+@interface QDRMineAccountCellModel : NSObject
+- (void)setAccountInfo:(id)accountInfo;
 @end
 
 static NSUserDefaults *QDRRuntimeStore(void) {
@@ -55,7 +61,38 @@ static void QDRPublishChapterCardCount(NSInteger count) {
     });
 }
 
-static BOOL QDRReadMineChapterCardValue(id object, NSInteger *count) {
+static id QDRObjectResult(id object, SEL selector) {
+    if (!object || ![object respondsToSelector:selector]) return nil;
+    Method method = class_getInstanceMethod(object_getClass(object), selector);
+    if (!method) return nil;
+    char returnType[16] = {0};
+    method_getReturnType(method, returnType, sizeof(returnType));
+    return returnType[0] == '@' ? ((id (*)(id, SEL))objc_msgSend)(object, selector) : nil;
+}
+
+static BOOL QDRIntegerResult(id object, SEL selector, NSInteger *value) {
+    if (!object || ![object respondsToSelector:selector]) return NO;
+    Method method = class_getInstanceMethod(object_getClass(object), selector);
+    if (!method) return NO;
+    char returnType[16] = {0};
+    method_getReturnType(method, returnType, sizeof(returnType));
+    if (returnType[0] == '@') {
+        id result = ((id (*)(id, SEL))objc_msgSend)(object, selector);
+        if (![result respondsToSelector:@selector(integerValue)]) return NO;
+        if (value) *value = [result integerValue];
+        return YES;
+    }
+    if (strchr("cislqCISLQB", returnType[0])) {
+        if (value) *value = ((NSInteger (*)(id, SEL))objc_msgSend)(object, selector);
+        return YES;
+    }
+    return NO;
+}
+
+static BOOL QDRReadMineChapterCardValueRecursive(id object, NSInteger *count,
+                                                  NSMutableSet<NSValue *> *visited,
+                                                  NSUInteger depth) {
+    if (!object || depth > 8) return NO;
     if ([object isKindOfClass:NSDictionary.class]) {
         for (id rawKey in (NSDictionary *)object) {
             NSString *key = [[rawKey description] lowercaseString];
@@ -64,12 +101,49 @@ static BOOL QDRReadMineChapterCardValue(id object, NSInteger *count) {
                 if (count) *count = [value integerValue];
                 return YES;
             }
-            if (QDRReadMineChapterCardValue(value, count)) return YES;
+            if (QDRReadMineChapterCardValueRecursive(value, count, visited, depth + 1)) return YES;
         }
     } else if ([object isKindOfClass:NSArray.class]) {
-        for (id value in (NSArray *)object) if (QDRReadMineChapterCardValue(value, count)) return YES;
+        for (id value in (NSArray *)object) {
+            if (QDRReadMineChapterCardValueRecursive(value, count, visited, depth + 1)) return YES;
+        }
+    } else if (![object isKindOfClass:NSString.class] && ![object isKindOfClass:NSNumber.class]) {
+        NSValue *identity = [NSValue valueWithPointer:(__bridge const void *)object];
+        if ([visited containsObject:identity]) return NO;
+        [visited addObject:identity];
+
+        const char *directNames[] = {"ChapterCard", "chapterCard", "chapterCardCount"};
+        for (NSUInteger index = 0; index < sizeof(directNames) / sizeof(directNames[0]); index++) {
+            if (QDRIntegerResult(object, sel_registerName(directNames[index]), count)) return YES;
+        }
+
+        id title = QDRObjectResult(object, @selector(title));
+        if (!title) title = QDRObjectResult(object, @selector(name));
+        if ([[title description] containsString:@"章节卡"]) {
+            const char *valueNames[] = {"value", "count", "amount", "balance", "number"};
+            for (NSUInteger index = 0; index < sizeof(valueNames) / sizeof(valueNames[0]); index++) {
+                if (QDRIntegerResult(object, sel_registerName(valueNames[index]), count)) return YES;
+            }
+        }
+
+        const char *childNames[] = {"accountInfo", "userInfoModel", "items", "list", "data"};
+        for (NSUInteger index = 0; index < sizeof(childNames) / sizeof(childNames[0]); index++) {
+            id child = QDRObjectResult(object, sel_registerName(childNames[index]));
+            if (QDRReadMineChapterCardValueRecursive(child, count, visited, depth + 1)) return YES;
+        }
     }
     return NO;
+}
+
+static BOOL QDRReadMineChapterCardValue(id object, NSInteger *count) {
+    return QDRReadMineChapterCardValueRecursive(object, count, [NSMutableSet set], 0);
+}
+
+static void QDRCaptureChapterCardFromNativeModel(id model, NSString *source) {
+    NSInteger count = 0;
+    if (!QDRReadMineChapterCardValue(model, &count)) return;
+    QDRPublishChapterCardCount(count);
+    QDRLog(@"chapter card captured from %@ count=%ld", source, (long)count);
 }
 
 static void QDRCollectLabels(UIView *view, NSMutableArray<UILabel *> *labels) {
@@ -411,7 +485,6 @@ static void QDRScheduleSplashSkip(NSUInteger attempt) {
         if (verified) {
             [[self store] setObject:[self todayKey] forKey:QDRLastCompletedKey];
             [[self store] synchronize];
-            QDRRefreshChapterCardFromCachedNativeRequest();
             QDRLog(@"script run verified; requests=%lu success=%lu; daily completion recorded",
                    (unsigned long)self.runFetchStarted, (unsigned long)self.runHTTPSuccessCount);
         } else {
@@ -631,55 +704,7 @@ static void QDRObserveTask(NSURLSessionTask *task) {
     if ([request.URL.absoluteString.lowercaseString containsString:@"getlogininfo"]) {
         [[QDRAutoRunner shared] captureRequest:request];
     }
-    if ([request.URL.absoluteString.lowercaseString containsString:@"/argus/api/v3/user/getaccountpage"] &&
-        !objc_getAssociatedObject(task, QDRChapterMirrorTaskKey)) {
-        @synchronized (QDRAutoRunner.class) {
-            objc_setAssociatedObject(QDRAutoRunner.class, QDRLatestAccountRequestKey,
-                                     [request copy], OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-        }
-        QDRRefreshChapterCardFromCachedNativeRequest();
-    }
 }
-
-static void QDRRefreshChapterCardFromCachedNativeRequest(void) {
-    NSURLRequest *request = objc_getAssociatedObject(QDRAutoRunner.class, QDRLatestAccountRequestKey);
-    if (!request.URL) return;
-    NSURLSessionDataTask *task = [NSURLSession.sharedSession dataTaskWithRequest:request
-                                                              completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
-        NSInteger count = 0;
-        id object = data.length ? [NSJSONSerialization JSONObjectWithData:data options:0 error:nil] : nil;
-        if (!error && QDRReadMineChapterCardValue(object, &count)) {
-            QDRPublishChapterCardCount(count);
-            QDRLog(@"chapter card refreshed from native account request count=%ld", (long)count);
-        }
-    }];
-    objc_setAssociatedObject(task, QDRChapterMirrorTaskKey, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-    [task resume];
-}
-
-%hook NSURLSession
-- (NSURLSessionDataTask *)dataTaskWithRequest:(NSURLRequest *)request
-                            completionHandler:(void (^)(NSData *, NSURLResponse *, NSError *))completionHandler {
-    NSString *URLString = request.URL.absoluteString.lowercaseString;
-    if ([URLString containsString:@"/argus/api/v3/user/getaccountpage"] && completionHandler) {
-        void (^wrappedCompletion)(NSData *, NSURLResponse *, NSError *) =
-        ^(NSData *data, NSURLResponse *response, NSError *error) {
-            NSInteger count = 0;
-            id object = data.length ? [NSJSONSerialization JSONObjectWithData:data options:0 error:nil] : nil;
-            if (!error && QDRReadMineChapterCardValue(object, &count)) {
-                QDRPublishChapterCardCount(count);
-                QDRLog(@"chapter card captured from native mine response count=%ld", (long)count);
-            } else {
-                QDRLog(@"native mine response contained no chapter-card value error=%@",
-                       error.localizedDescription ?: @"<none>");
-            }
-            completionHandler(data, response, error);
-        };
-        return %orig(request, wrappedCompletion);
-    }
-    return %orig;
-}
-%end
 
 %hook NSURLSessionTask
 - (void)resume {
@@ -1088,10 +1113,7 @@ static void QDRInstallShelfCheckinControls(QDRShelfNavView *navigationView) {
     QDRApplyShelfCollapsedLayout(self);
     QDRCollapseLeadReadHeadersInView(((UIViewController *)self).view);
     QDRShelfNavView *navigationView = QDRFindShelfNavigationView(((UIViewController *)self).view);
-    if (navigationView) {
-        QDRInstallShelfCheckinControls(navigationView);
-        QDRRefreshChapterCardFromCachedNativeRequest();
-    }
+    if (navigationView) QDRInstallShelfCheckinControls(navigationView);
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.3 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         QDRShelfNavView *delayedNavigationView = QDRFindShelfNavigationView(((UIViewController *)self).view);
         if (delayedNavigationView) QDRInstallShelfCheckinControls(delayedNavigationView);
@@ -1141,6 +1163,24 @@ static void QDRInstallShelfCheckinControls(QDRShelfNavView *navigationView) {
 %end
 %end
 
+%group QDRMineViewModelHooks
+%hook QDRMineViewModel
+- (void)setUserInfoModel:(id)model {
+    %orig;
+    QDRCaptureChapterCardFromNativeModel(model, @"mine view model");
+}
+%end
+%end
+
+%group QDRMineAccountCellModelHooks
+%hook QDRMineAccountCellModel
+- (void)setAccountInfo:(id)accountInfo {
+    %orig;
+    QDRCaptureChapterCardFromNativeModel(accountInfo, @"mine account model");
+}
+%end
+%end
+
 %ctor {
     NSString *bundle = NSBundle.mainBundle.bundleIdentifier;
     if ([bundle isEqualToString:QDRTargetBundle] || [bundle isEqualToString:QDREnterpriseBundle]) {
@@ -1162,6 +1202,14 @@ static void QDRInstallShelfCheckinControls(QDRShelfNavView *navigationView) {
             %init(QDRMineAccountCellHooks, QDRMineAccountCell = mineAccountCell);
         } else {
             QDRLog(@"mine account cell hook unavailable");
+        }
+        Class mineViewModel = objc_getClass("_TtC16QDReaderAppStore15QDMineViewModel");
+        if (mineViewModel && class_getInstanceMethod(mineViewModel, @selector(setUserInfoModel:))) {
+            %init(QDRMineViewModelHooks, QDRMineViewModel = mineViewModel);
+        }
+        Class mineAccountModel = objc_getClass("_TtC16QDReaderAppStore22QDMineAccountCellModel");
+        if (mineAccountModel && class_getInstanceMethod(mineAccountModel, @selector(setAccountInfo:))) {
+            %init(QDRMineAccountCellModelHooks, QDRMineAccountCellModel = mineAccountModel);
         }
     }
 }

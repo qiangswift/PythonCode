@@ -6,9 +6,9 @@
   against later asynchronous reinsertion.
 - The check-in circle and glyph are smaller to match the neighboring search
   control.
-- Chapter-card balance refresh mirrors QDReader's own signed
-  `/argus/api/v3/user/getaccountpage` request and publishes `ChapterCard`
-  immediately; the rendered Mine account cell remains only a fallback.
+- Chapter-card balance is read only when QDReader assigns its in-memory
+  `QDMineViewModel.userInfoModel` or `QDMineAccountCellModel.accountInfo`;
+  no balance request is issued, and the rendered Mine cell is only a fallback.
 - Only the RootHide package is requested for this release. Compilation and
   on-device behavior must be reported separately.
 

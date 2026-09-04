@@ -5,6 +5,7 @@
 #import <objc/message.h>
 #import <dlfcn.h>
 #import <mach-o/dyld.h>
+#import <math.h>
 
 static NSString *const QDRTargetBundle = @"m.qidian.QDReaderAppStore";
 static NSString *const QDREnterpriseBundle = @"m.qidian.QDReaderQiYe";
@@ -27,6 +28,9 @@ static void QDRLog(NSString *format, ...);
 
 @interface QDRShelfNavView : UIView
 - (UIStackView *)rightButtonContainer;
+@end
+
+@interface QDRMineAccountCell : UITableViewCell
 @end
 
 static NSUserDefaults *QDRRuntimeStore(void) {
@@ -59,6 +63,54 @@ static BOOL QDRReadMineChapterCardValue(id object, NSInteger *count) {
         for (id value in (NSArray *)object) if (QDRReadMineChapterCardValue(value, count)) return YES;
     }
     return NO;
+}
+
+static void QDRCollectLabels(UIView *view, NSMutableArray<UILabel *> *labels) {
+    if ([view isKindOfClass:UILabel.class]) [labels addObject:(UILabel *)view];
+    for (UIView *subview in view.subviews) QDRCollectLabels(subview, labels);
+}
+
+static BOOL QDRStrictIntegerFromText(NSString *text, NSInteger *value) {
+    NSString *trimmed = [text stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+    if (!trimmed.length || [trimmed rangeOfCharacterFromSet:NSCharacterSet.decimalDigitCharacterSet.invertedSet].location != NSNotFound) return NO;
+    if (value) *value = trimmed.integerValue;
+    return YES;
+}
+
+static void QDRCaptureChapterCardFromMineCell(QDRMineAccountCell *cell) {
+    NSMutableArray<UILabel *> *labels = [NSMutableArray array];
+    QDRCollectLabels(cell.contentView, labels);
+    UILabel *descriptionLabel = nil;
+    for (UILabel *label in labels) {
+        if ([label.text containsString:@"章节卡"]) {
+            descriptionLabel = label;
+            break;
+        }
+    }
+    if (!descriptionLabel) return;
+
+    CGRect descriptionFrame = [descriptionLabel.superview convertRect:descriptionLabel.frame toView:cell.contentView];
+    UILabel *bestLabel = nil;
+    NSInteger bestCount = 0;
+    CGFloat bestScore = CGFLOAT_MAX;
+    for (UILabel *candidate in labels) {
+        NSInteger count = 0;
+        if (candidate == descriptionLabel || !QDRStrictIntegerFromText(candidate.text, &count)) continue;
+        CGRect frame = [candidate.superview convertRect:candidate.frame toView:cell.contentView];
+        if (CGRectGetMidY(frame) >= CGRectGetMidY(descriptionFrame)) continue;
+        CGFloat vertical = CGRectGetMinY(descriptionFrame) - CGRectGetMaxY(frame);
+        CGFloat horizontal = fabs(CGRectGetMidX(frame) - CGRectGetMidX(descriptionFrame));
+        if (vertical > 90.0 || horizontal > 70.0) continue;
+        CGFloat score = vertical + horizontal * 2.0;
+        if (score < bestScore) {
+            bestScore = score;
+            bestLabel = candidate;
+            bestCount = count;
+        }
+    }
+    if (!bestLabel) return;
+    QDRPublishChapterCardCount(bestCount);
+    QDRLog(@"chapter card captured from mine account cell count=%ld", (long)bestCount);
 }
 
 static NSString *QDRLogPath(void) {
@@ -857,9 +909,10 @@ static void QDRLayoutShelfCheckinControls(QDRShelfNavView *navigationView) {
     if (buttonIndex != NSNotFound && buttonIndex + 3 < items.count) {
         UIView *gameItem = items[buttonIndex + 2];
         UIView *moreItem = items[buttonIndex + 3];
-        CGRect gameFrame = [gameItem.superview convertRect:gameItem.frame toView:navigationView];
+        gameItem.hidden = YES;
+        CGRect searchFrame = [searchItem.superview convertRect:searchItem.frame toView:navigationView];
         CGRect moreFrame = [moreItem.superview convertRect:moreItem.frame toView:navigationView];
-        CGRect target = CGRectUnion(gameFrame, moreFrame);
+        CGRect target = CGRectUnion(searchFrame, moreFrame);
         CGFloat labelHeight = 22.0;
         label.frame = CGRectMake(CGRectGetMinX(target), MAX(0, CGRectGetMinY(target) - labelHeight - 2.0),
                                  CGRectGetWidth(target), labelHeight);
@@ -1014,10 +1067,19 @@ static void QDRInstallShelfCheckinControls(QDRShelfNavView *navigationView) {
 
 %end
 
+%group QDRMineAccountCellHooks
+%hook QDRMineAccountCell
+- (void)layoutSubviews {
+    %orig;
+    QDRCaptureChapterCardFromMineCell(self);
+}
+%end
+%end
+
 %ctor {
     NSString *bundle = NSBundle.mainBundle.bundleIdentifier;
     if ([bundle isEqualToString:QDRTargetBundle] || [bundle isEqualToString:QDREnterpriseBundle]) {
-        QDRLog(@"loaded version=1.5.5 bundle=%@", bundle);
+        QDRLog(@"loaded version=1.5.6 bundle=%@", bundle);
         %init;
         Class shelfVC = objc_getClass("_TtC16QDReaderAppStore25QDBookShelfViewController");
         Class shelfHeader = objc_getClass("_TtC16QDReaderAppStore25QDBookShelfLeadReadHeader");
@@ -1029,6 +1091,12 @@ static void QDRInstallShelfCheckinControls(QDRShelfNavView *navigationView) {
                   QDRShelfNavView = shelfNav);
         } else {
             QDRLog(@"bookshelf hook unavailable vc=%d header=%d nav=%d", shelfVC != Nil, shelfHeader != Nil, shelfNav != Nil);
+        }
+        Class mineAccountCell = objc_getClass("_TtC16QDReaderAppStore17QDMineAccountCell");
+        if (mineAccountCell) {
+            %init(QDRMineAccountCellHooks, QDRMineAccountCell = mineAccountCell);
+        } else {
+            QDRLog(@"mine account cell hook unavailable");
         }
     }
 }

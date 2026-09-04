@@ -12,7 +12,8 @@ The bookshelf navigation bar adds a native-style chapter-card balance and a
 check-in icon immediately before the existing search button. Tapping the icon
 runs the same verified check-in pipeline directly. The balance is captured
 without extra requests from QDReader's native **Mine** account-page response
-and its ChapterCard field.
+and its ChapterCard field. The rendered Mine account cell is also read as a
+fallback for networking stacks that do not expose an NSURLSession completion.
 
 The tweak shows a start alert and a final alert. Diagnostic output is stored in
 the app sandbox at `Documents/QDReaderAutoCheckin.log`. After a completed run,

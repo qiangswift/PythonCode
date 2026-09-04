@@ -1,6 +1,6 @@
 Package: com.swiftss.qdreaderautocheckin
 Name: 起点签到去广告
-Version: 1.5.5
+Version: 1.5.6
 Architecture: iphoneos-arm
 Description: Run QDReader check-in from the bookshelf, show chapter-card balance, and suppress launch promotions.
 Maintainer: swiftss

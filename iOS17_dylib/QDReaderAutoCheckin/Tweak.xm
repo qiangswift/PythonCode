@@ -804,11 +804,56 @@ static void QDRUpdateShelfChapterCardLabel(QDRShelfNavView *navigationView) {
         : @"章节卡 --";
 }
 
+static UIStackView *QDRFindShelfButtonStack(UIView *view) {
+    if ([view isKindOfClass:UIStackView.class]) {
+        UIStackView *stack = (UIStackView *)view;
+        if (stack.axis == UILayoutConstraintAxisHorizontal && stack.arrangedSubviews.count >= 3) {
+            NSUInteger navigationButtons = 0;
+            for (UIView *item in stack.arrangedSubviews) {
+                NSString *name = NSStringFromClass(item.class).lowercaseString;
+                if ([name containsString:@"bookshelfnavbutton"] || [name containsString:@"navbarbutton"]) navigationButtons++;
+            }
+            if (navigationButtons >= 2) return stack;
+        }
+    }
+    for (UIView *subview in view.subviews) {
+        UIStackView *found = QDRFindShelfButtonStack(subview);
+        if (found) return found;
+    }
+    return nil;
+}
+
+static UIStackView *QDRShelfButtonStack(QDRShelfNavView *navigationView) {
+    if ([navigationView respondsToSelector:@selector(rightButtonContainer)]) {
+        id candidate = ((id (*)(id, SEL))objc_msgSend)(navigationView, @selector(rightButtonContainer));
+        if ([candidate isKindOfClass:UIStackView.class]) return candidate;
+    }
+    Ivar ivar = class_getInstanceVariable(object_getClass(navigationView), "rightButtonContainer");
+    if (ivar) {
+        id candidate = object_getIvar(navigationView, ivar);
+        if ([candidate isKindOfClass:UIStackView.class]) return candidate;
+    }
+    return QDRFindShelfButtonStack(navigationView);
+}
+
+static QDRShelfNavView *QDRFindShelfNavigationView(UIView *view) {
+    Class navigationClass = objc_getClass("_TtC16QDReaderAppStore18QDBookShelfNavView");
+    if (navigationClass && [view isKindOfClass:navigationClass]) return (QDRShelfNavView *)view;
+    for (UIView *subview in view.subviews) {
+        QDRShelfNavView *found = QDRFindShelfNavigationView(subview);
+        if (found) return found;
+    }
+    return nil;
+}
+
 static void QDRInstallShelfCheckinControls(QDRShelfNavView *navigationView) {
     if (objc_getAssociatedObject(navigationView, QDRShelfCheckinButtonKey)) return;
-    UIStackView *stack = [navigationView respondsToSelector:@selector(rightButtonContainer)]
-        ? navigationView.rightButtonContainer : nil;
-    if (![stack isKindOfClass:UIStackView.class]) return;
+    UIStackView *stack = QDRShelfButtonStack(navigationView);
+    if (![stack isKindOfClass:UIStackView.class]) {
+        QDRLog(@"bookshelf checkin UI unresolved nav=%@ subviews=%lu",
+               NSStringFromClass(navigationView.class), (unsigned long)navigationView.subviews.count);
+        return;
+    }
 
     UILabel *label = [UILabel new];
     label.font = [UIFont systemFontOfSize:12 weight:UIFontWeightMedium];
@@ -839,6 +884,8 @@ static void QDRInstallShelfCheckinControls(QDRShelfNavView *navigationView) {
                                                name:QDRChapterCardCountDidChange
                                              object:nil];
     QDRUpdateShelfChapterCardLabel(navigationView);
+    QDRLog(@"bookshelf checkin UI installed stack=%@ originalItems=%lu icon=%d",
+           NSStringFromClass(stack.class), (unsigned long)(stack.arrangedSubviews.count - 2), QDRShelfCheckinImage() != nil);
 }
 
 %group QDRShelfPromotionHooks
@@ -855,6 +902,13 @@ static void QDRInstallShelfCheckinControls(QDRShelfNavView *navigationView) {
     %orig;
     QDRApplyShelfCollapsedLayout(self);
     QDRCollapseLeadReadHeadersInView(((UIViewController *)self).view);
+    QDRShelfNavView *navigationView = QDRFindShelfNavigationView(((UIViewController *)self).view);
+    if (navigationView) QDRInstallShelfCheckinControls(navigationView);
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.3 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        QDRShelfNavView *delayedNavigationView = QDRFindShelfNavigationView(((UIViewController *)self).view);
+        if (delayedNavigationView) QDRInstallShelfCheckinControls(delayedNavigationView);
+        else QDRLog(@"bookshelf checkin UI nav view unresolved after appearance");
+    });
 }
 - (void)enterForeground {
     %orig;
@@ -896,7 +950,7 @@ static void QDRInstallShelfCheckinControls(QDRShelfNavView *navigationView) {
 %ctor {
     NSString *bundle = NSBundle.mainBundle.bundleIdentifier;
     if ([bundle isEqualToString:QDRTargetBundle] || [bundle isEqualToString:QDREnterpriseBundle]) {
-        QDRLog(@"loaded version=1.5.0 bundle=%@", bundle);
+        QDRLog(@"loaded version=1.5.1 bundle=%@", bundle);
         %init;
         Class shelfVC = objc_getClass("_TtC16QDReaderAppStore25QDBookShelfViewController");
         Class shelfHeader = objc_getClass("_TtC16QDReaderAppStore25QDBookShelfLeadReadHeader");

@@ -28,8 +28,7 @@ static const void *QDRShelfChapterCardLabelKey = &QDRShelfChapterCardLabelKey;
 - (UIStackView *)rightButtonContainer;
 @end
 
-@interface QDRChapterCardObject : NSObject
-- (void)setTotalCount:(NSInteger)count;
+@interface QDRMineAccountInfoItemView : UIView
 @end
 
 static NSUserDefaults *QDRRuntimeStore(void) {
@@ -47,33 +46,23 @@ static void QDRPublishChapterCardCount(NSInteger count) {
     });
 }
 
-static void QDRFindChapterCardCount(id object, NSString *context) {
-    if ([object isKindOfClass:NSDictionary.class]) {
-        NSDictionary *dictionary = object;
-        NSString *lowerContext = context.lowercaseString ?: @"";
-        BOOL cardContext = [lowerContext containsString:@"chaptercard"] ||
-                           [lowerContext containsString:@"chapter_card"] ||
-                           dictionary[@"CanUseChapterCard"] != nil || dictionary[@"canUseChapterCard"] != nil;
-        for (id rawKey in dictionary) {
-            NSString *key = [[rawKey description] lowercaseString];
-            id value = dictionary[rawKey];
-            BOOL countKey = [key isEqualToString:@"totalcount"] || [key isEqualToString:@"total_count"] ||
-                            [key isEqualToString:@"chaptercardcount"] || [key isEqualToString:@"chapter_card_count"];
-            if ((cardContext || [key isEqualToString:@"chaptercardcount"] || [key isEqualToString:@"chapter_card_count"]) &&
-                countKey && [value respondsToSelector:@selector(integerValue)]) {
-                QDRPublishChapterCardCount([value integerValue]);
-            }
-            QDRFindChapterCardCount(value, [NSString stringWithFormat:@"%@/%@", lowerContext, key]);
-        }
-    } else if ([object isKindOfClass:NSArray.class]) {
-        for (id value in object) QDRFindChapterCardCount(value, context);
-    }
+static id QDRObjectIvar(id object, const char *name) {
+    if (!object) return nil;
+    Ivar ivar = class_getInstanceVariable(object_getClass(object), name);
+    return ivar ? object_getIvar(object, ivar) : nil;
 }
 
-static void QDRInspectChapterCardResponse(NSData *data) {
-    if (!data.length) return;
-    id object = [NSJSONSerialization JSONObjectWithData:data options:0 error:nil];
-    if (object) QDRFindChapterCardCount(object, @"");
+static void QDRCaptureMineChapterCardCount(QDRMineAccountInfoItemView *itemView) {
+    UILabel *descriptionLabel = QDRObjectIvar(itemView, "desL");
+    UILabel *valueLabel = QDRObjectIvar(itemView, "valueL");
+    if (![descriptionLabel isKindOfClass:UILabel.class] || ![valueLabel isKindOfClass:UILabel.class]) return;
+    if (![descriptionLabel.text containsString:@"章节卡"]) return;
+    NSString *digits = [[valueLabel.text ?: @"" componentsSeparatedByCharactersInSet:
+                         NSCharacterSet.decimalDigitCharacterSet.invertedSet] componentsJoinedByString:@""];
+    if (!digits.length) return;
+    NSInteger count = digits.integerValue;
+    QDRPublishChapterCardCount(count);
+    QDRLog(@"chapter card captured from mine header count=%ld", (long)count);
 }
 
 static NSString *QDRLogPath(void) {
@@ -500,7 +489,6 @@ static void QDRScheduleSplashSkip(NSUInteger attempt) {
         id body = options[@"body"];
         if ([body isKindOfClass:NSString.class]) request.HTTPBody = [body dataUsingEncoding:NSUTF8StringEncoding];
         [[[NSURLSession sharedSession] dataTaskWithRequest:request completionHandler:^(NSData *bodyData, NSURLResponse *response, NSError *networkError) {
-            if (!networkError) QDRInspectChapterCardResponse(bodyData);
             dispatch_async(weakSelf.queue, ^{
                 NSMutableDictionary *result = [NSMutableDictionary dictionary];
                 NSInteger statusCode = 0;
@@ -999,11 +987,11 @@ static void QDRInstallShelfCheckinControls(QDRShelfNavView *navigationView) {
 
 %end
 
-%group QDRChapterCardHooks
-%hook QDRChapterCardObject
-- (void)setTotalCount:(NSInteger)count {
+%group QDRMineAccountHooks
+%hook QDRMineAccountInfoItemView
+- (void)layoutSubviews {
     %orig;
-    QDRPublishChapterCardCount(count);
+    QDRCaptureMineChapterCardCount(self);
 }
 %end
 %end
@@ -1011,7 +999,7 @@ static void QDRInstallShelfCheckinControls(QDRShelfNavView *navigationView) {
 %ctor {
     NSString *bundle = NSBundle.mainBundle.bundleIdentifier;
     if ([bundle isEqualToString:QDRTargetBundle] || [bundle isEqualToString:QDREnterpriseBundle]) {
-        QDRLog(@"loaded version=1.5.2 bundle=%@", bundle);
+        QDRLog(@"loaded version=1.5.3 bundle=%@", bundle);
         %init;
         Class shelfVC = objc_getClass("_TtC16QDReaderAppStore25QDBookShelfViewController");
         Class shelfHeader = objc_getClass("_TtC16QDReaderAppStore25QDBookShelfLeadReadHeader");
@@ -1024,7 +1012,11 @@ static void QDRInstallShelfCheckinControls(QDRShelfNavView *navigationView) {
         } else {
             QDRLog(@"bookshelf hook unavailable vc=%d header=%d nav=%d", shelfVC != Nil, shelfHeader != Nil, shelfNav != Nil);
         }
-        Class chapterCard = objc_getClass("_TtC16QDReaderAppStore15ChapterCardObjc");
-        if (chapterCard) %init(QDRChapterCardHooks, QDRChapterCardObject = chapterCard);
+        Class mineAccountItem = objc_getClass("_TtC16QDReaderAppStore27QDMineMyAccountInfoItemView");
+        if (mineAccountItem) {
+            %init(QDRMineAccountHooks, QDRMineAccountInfoItemView = mineAccountItem);
+        } else {
+            QDRLog(@"mine chapter-card item hook unavailable");
+        }
     }
 }

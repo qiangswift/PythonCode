@@ -59,7 +59,8 @@ static void QDRFindChapterCardCount(id object, NSString *context) {
             id value = dictionary[rawKey];
             BOOL countKey = [key isEqualToString:@"totalcount"] || [key isEqualToString:@"total_count"] ||
                             [key isEqualToString:@"chaptercardcount"] || [key isEqualToString:@"chapter_card_count"];
-            if (cardContext && countKey && [value respondsToSelector:@selector(integerValue)]) {
+            if ((cardContext || [key isEqualToString:@"chaptercardcount"] || [key isEqualToString:@"chapter_card_count"]) &&
+                countKey && [value respondsToSelector:@selector(integerValue)]) {
                 QDRPublishChapterCardCount([value integerValue]);
             }
             QDRFindChapterCardCount(value, [NSString stringWithFormat:@"%@/%@", lowerContext, key]);
@@ -284,7 +285,8 @@ static void QDRScheduleSplashSkip(NSUInteger attempt) {
 
 - (void)startForWelfareEntry:(NSString *)source {
     dispatch_async(self.queue, ^{
-        if ([[[self store] stringForKey:QDRLastCompletedKey] isEqualToString:[self todayKey]]) {
+        BOOL manualShelfRun = [source isEqualToString:@"bookshelf-button"];
+        if (!manualShelfRun && [[[self store] stringForKey:QDRLastCompletedKey] isEqualToString:[self todayKey]]) {
             QDRLog(@"skip: all tasks already completed today");
             [self presentMessage:@"今日任务已经执行完成，无需重复运行" title:@"起点自动签到"];
             return;
@@ -804,6 +806,57 @@ static void QDRUpdateShelfChapterCardLabel(QDRShelfNavView *navigationView) {
         : @"章节卡 --";
 }
 
+static UIStackView *QDRShelfButtonStack(QDRShelfNavView *navigationView);
+
+static UIColor *QDRVisibleTintColorInView(UIView *view) {
+    if ([view isKindOfClass:UIImageView.class] && view.tintColor &&
+        ![view.tintColor isEqual:UIColor.clearColor]) return view.tintColor;
+    if ([view isKindOfClass:UILabel.class] && ((UILabel *)view).textColor) return ((UILabel *)view).textColor;
+    for (UIView *subview in view.subviews) {
+        UIColor *color = QDRVisibleTintColorInView(subview);
+        if (color) return color;
+    }
+    return nil;
+}
+
+static UIColor *QDRVisibleBackgroundColorInView(UIView *view) {
+    UIColor *color = view.backgroundColor;
+    if (color && ![color isEqual:UIColor.clearColor] && CGColorGetAlpha(color.CGColor) > 0.05) return color;
+    for (UIView *subview in view.subviews) {
+        UIColor *nested = QDRVisibleBackgroundColorInView(subview);
+        if (nested) return nested;
+    }
+    return nil;
+}
+
+static void QDRLayoutShelfCheckinControls(QDRShelfNavView *navigationView) {
+    UIButton *button = objc_getAssociatedObject(navigationView, QDRShelfCheckinButtonKey);
+    UILabel *label = objc_getAssociatedObject(navigationView, QDRShelfChapterCardLabelKey);
+    UIStackView *stack = QDRShelfButtonStack(navigationView);
+    if (!button || !label || !stack) return;
+
+    NSArray<UIView *> *items = stack.arrangedSubviews;
+    NSUInteger buttonIndex = [items indexOfObject:button];
+    UIView *searchItem = buttonIndex != NSNotFound && buttonIndex + 1 < items.count ? items[buttonIndex + 1] : nil;
+    UIColor *foreground = searchItem ? QDRVisibleTintColorInView(searchItem) : nil;
+    UIColor *background = searchItem ? QDRVisibleBackgroundColorInView(searchItem) : nil;
+    button.tintColor = foreground ?: UIColor.labelColor;
+    button.backgroundColor = background ?: UIColor.tertiarySystemFillColor;
+    label.textColor = foreground ?: UIColor.labelColor;
+
+    if (buttonIndex != NSNotFound && buttonIndex + 3 < items.count) {
+        UIView *gameItem = items[buttonIndex + 2];
+        UIView *moreItem = items[buttonIndex + 3];
+        CGRect gameFrame = [gameItem.superview convertRect:gameItem.frame toView:navigationView];
+        CGRect moreFrame = [moreItem.superview convertRect:moreItem.frame toView:navigationView];
+        CGRect target = CGRectUnion(gameFrame, moreFrame);
+        CGFloat labelHeight = 22.0;
+        label.frame = CGRectMake(CGRectGetMinX(target), MAX(0, CGRectGetMinY(target) - labelHeight - 2.0),
+                                 CGRectGetWidth(target), labelHeight);
+        [navigationView bringSubviewToFront:label];
+    }
+}
+
 static UIStackView *QDRFindShelfButtonStack(UIView *view) {
     if ([view isKindOfClass:UIStackView.class]) {
         UIStackView *stack = (UIStackView *)view;
@@ -856,18 +909,19 @@ static void QDRInstallShelfCheckinControls(QDRShelfNavView *navigationView) {
     }
 
     UILabel *label = [UILabel new];
-    label.font = [UIFont systemFontOfSize:12 weight:UIFontWeightMedium];
+    label.font = [UIFont systemFontOfSize:13 weight:UIFontWeightSemibold];
     label.textColor = UIColor.labelColor;
     label.textAlignment = NSTextAlignmentCenter;
     label.adjustsFontSizeToFitWidth = YES;
     label.minimumScaleFactor = 0.75;
-    [label.widthAnchor constraintGreaterThanOrEqualToConstant:58].active = YES;
-    [label.heightAnchor constraintEqualToConstant:40].active = YES;
+    label.userInteractionEnabled = NO;
+    label.layer.shadowColor = UIColor.blackColor.CGColor;
+    label.layer.shadowOpacity = 0.25;
+    label.layer.shadowRadius = 1;
+    label.layer.shadowOffset = CGSizeMake(0, 1);
 
     UIButton *button = [UIButton buttonWithType:UIButtonTypeSystem];
     button.accessibilityLabel = @"签到";
-    button.tintColor = UIColor.labelColor;
-    button.backgroundColor = UIColor.tertiarySystemFillColor;
     button.layer.cornerRadius = 20;
     button.imageView.contentMode = UIViewContentModeScaleAspectFit;
     [button setImage:QDRShelfCheckinImage() forState:UIControlStateNormal];
@@ -875,8 +929,8 @@ static void QDRInstallShelfCheckinControls(QDRShelfNavView *navigationView) {
     [button.heightAnchor constraintEqualToConstant:40].active = YES;
     [button addTarget:[QDRAutoRunner shared] action:@selector(startFromShelfButton:) forControlEvents:UIControlEventTouchUpInside];
 
-    [stack insertArrangedSubview:label atIndex:0];
-    [stack insertArrangedSubview:button atIndex:MIN((NSUInteger)1, stack.arrangedSubviews.count)];
+    [stack insertArrangedSubview:button atIndex:0];
+    [navigationView addSubview:label];
     objc_setAssociatedObject(navigationView, QDRShelfChapterCardLabelKey, label, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     objc_setAssociatedObject(navigationView, QDRShelfCheckinButtonKey, button, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     [NSNotificationCenter.defaultCenter addObserver:navigationView
@@ -884,8 +938,9 @@ static void QDRInstallShelfCheckinControls(QDRShelfNavView *navigationView) {
                                                name:QDRChapterCardCountDidChange
                                              object:nil];
     QDRUpdateShelfChapterCardLabel(navigationView);
+    QDRLayoutShelfCheckinControls(navigationView);
     QDRLog(@"bookshelf checkin UI installed stack=%@ originalItems=%lu icon=%d",
-           NSStringFromClass(stack.class), (unsigned long)(stack.arrangedSubviews.count - 2), QDRShelfCheckinImage() != nil);
+           NSStringFromClass(stack.class), (unsigned long)(stack.arrangedSubviews.count - 1), QDRShelfCheckinImage() != nil);
 }
 
 %group QDRShelfPromotionHooks
@@ -923,6 +978,12 @@ static void QDRInstallShelfCheckinControls(QDRShelfNavView *navigationView) {
 - (void)layoutSubviews {
     %orig;
     QDRInstallShelfCheckinControls(self);
+    QDRLayoutShelfCheckinControls(self);
+}
+
+- (void)traitCollectionDidChange:(UITraitCollection *)previousTraitCollection {
+    %orig;
+    QDRLayoutShelfCheckinControls(self);
 }
 
 %new
@@ -950,7 +1011,7 @@ static void QDRInstallShelfCheckinControls(QDRShelfNavView *navigationView) {
 %ctor {
     NSString *bundle = NSBundle.mainBundle.bundleIdentifier;
     if ([bundle isEqualToString:QDRTargetBundle] || [bundle isEqualToString:QDREnterpriseBundle]) {
-        QDRLog(@"loaded version=1.5.1 bundle=%@", bundle);
+        QDRLog(@"loaded version=1.5.2 bundle=%@", bundle);
         %init;
         Class shelfVC = objc_getClass("_TtC16QDReaderAppStore25QDBookShelfViewController");
         Class shelfHeader = objc_getClass("_TtC16QDReaderAppStore25QDBookShelfLeadReadHeader");

@@ -29,9 +29,6 @@ static void QDRLog(NSString *format, ...);
 - (UIStackView *)rightButtonContainer;
 @end
 
-@interface QDRMineAccountInfoItemView : UIView
-@end
-
 static NSUserDefaults *QDRRuntimeStore(void) {
     return [[NSUserDefaults alloc] initWithSuiteName:QDRPrefsSuite];
 }
@@ -47,23 +44,21 @@ static void QDRPublishChapterCardCount(NSInteger count) {
     });
 }
 
-static id QDRObjectIvar(id object, const char *name) {
-    if (!object) return nil;
-    Ivar ivar = class_getInstanceVariable(object_getClass(object), name);
-    return ivar ? object_getIvar(object, ivar) : nil;
-}
-
-static void QDRCaptureMineChapterCardCount(QDRMineAccountInfoItemView *itemView) {
-    UILabel *descriptionLabel = QDRObjectIvar(itemView, "desL");
-    UILabel *valueLabel = QDRObjectIvar(itemView, "valueL");
-    if (![descriptionLabel isKindOfClass:UILabel.class] || ![valueLabel isKindOfClass:UILabel.class]) return;
-    if (![descriptionLabel.text containsString:@"章节卡"]) return;
-    NSString *digits = [[valueLabel.text ?: @"" componentsSeparatedByCharactersInSet:
-                         NSCharacterSet.decimalDigitCharacterSet.invertedSet] componentsJoinedByString:@""];
-    if (!digits.length) return;
-    NSInteger count = digits.integerValue;
-    QDRPublishChapterCardCount(count);
-    QDRLog(@"chapter card captured from mine header count=%ld", (long)count);
+static BOOL QDRReadMineChapterCardValue(id object, NSInteger *count) {
+    if ([object isKindOfClass:NSDictionary.class]) {
+        for (id rawKey in (NSDictionary *)object) {
+            NSString *key = [[rawKey description] lowercaseString];
+            id value = ((NSDictionary *)object)[rawKey];
+            if ([key isEqualToString:@"chaptercard"] && [value respondsToSelector:@selector(integerValue)]) {
+                if (count) *count = [value integerValue];
+                return YES;
+            }
+            if (QDRReadMineChapterCardValue(value, count)) return YES;
+        }
+    } else if ([object isKindOfClass:NSArray.class]) {
+        for (id value in (NSArray *)object) if (QDRReadMineChapterCardValue(value, count)) return YES;
+    }
+    return NO;
 }
 
 static NSString *QDRLogPath(void) {
@@ -156,6 +151,7 @@ static void QDRScheduleSplashSkip(NSUInteger attempt) {
 - (void)startForWelfareEntry;
 - (void)startForWelfareEntry:(NSString *)source;
 - (void)startFromShelfButton:(UIButton *)sender;
+- (void)refreshChapterCardFromMineAPI;
 - (void)presentMessage:(NSString *)message title:(NSString *)title;
 - (void)presentMessage:(NSString *)message title:(NSString *)title completion:(dispatch_block_t)completion;
 @end
@@ -264,6 +260,52 @@ static void QDRScheduleSplashSkip(NSUInteger attempt) {
 
 - (void)startFromShelfButton:(UIButton *)sender {
     [self startForWelfareEntry:@"bookshelf-button"];
+}
+
+- (void)refreshChapterCardFromMineAPI {
+    static NSDate *lastRefresh;
+    @synchronized (QDRAutoRunner.class) {
+        if (lastRefresh && -lastRefresh.timeIntervalSinceNow < 30.0) return;
+        lastRefresh = NSDate.date;
+    }
+    NSURL *url = [NSURL URLWithString:@"https://druidv6.if.qidian.com/argus/api/v3/user/getaccountpage"];
+    NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:url];
+    request.timeoutInterval = 20;
+
+    NSMutableArray<NSString *> *pairs = [NSMutableArray array];
+    for (NSHTTPCookie *cookie in NSHTTPCookieStorage.sharedHTTPCookieStorage.cookies) {
+        NSString *domain = cookie.domain.lowercaseString;
+        if ([domain containsString:@"qidian"] || [domain containsString:@"qdmm"] || [domain containsString:@"yuewen"]) {
+            [pairs addObject:[NSString stringWithFormat:@"%@=%@", cookie.name, cookie.value]];
+        }
+    }
+    if (pairs.count) [request setValue:[pairs componentsJoinedByString:@"; "] forHTTPHeaderField:@"Cookie"];
+
+    Class headerClass = NSClassFromString(@"QDHeaderService");
+    id headerService = headerClass ? [headerClass new] : nil;
+    NSString *headerKey = @"QDHeader";
+    NSString *headerValue = nil;
+    if ([headerService respondsToSelector:@selector(getQDHeaderKey)]) {
+        headerKey = ((id (*)(id, SEL))objc_msgSend)(headerService, @selector(getQDHeaderKey)) ?: headerKey;
+    }
+    if ([headerService respondsToSelector:@selector(getQDHeaderValue)]) {
+        headerValue = ((id (*)(id, SEL))objc_msgSend)(headerService, @selector(getQDHeaderValue));
+    }
+    if (headerValue.length) [request setValue:headerValue forHTTPHeaderField:headerKey];
+
+    [[[NSURLSession sharedSession] dataTaskWithRequest:request completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
+        NSInteger status = [response isKindOfClass:NSHTTPURLResponse.class] ? ((NSHTTPURLResponse *)response).statusCode : 0;
+        id object = data.length ? [NSJSONSerialization JSONObjectWithData:data options:0 error:nil] : nil;
+        NSInteger count = 0;
+        if (!error && status >= 200 && status < 300 && QDRReadMineChapterCardValue(object, &count)) {
+            QDRPublishChapterCardCount(count);
+            QDRLog(@"chapter card refreshed from mine API count=%ld", (long)count);
+        } else {
+            QDRLog(@"chapter card mine API failed status=%ld error=%@ field=%d",
+                   (long)status, error.localizedDescription ?: @"<none>",
+                   QDRReadMineChapterCardValue(object, NULL));
+        }
+    }] resume];
 }
 
 - (NSString *)todayKey {
@@ -831,6 +873,8 @@ static void QDRLayoutShelfCheckinControls(QDRShelfNavView *navigationView) {
     UIColor *background = searchItem ? QDRVisibleBackgroundColorInView(searchItem) : nil;
     button.tintColor = foreground ?: UIColor.labelColor;
     button.backgroundColor = background ?: UIColor.tertiarySystemFillColor;
+    button.layer.cornerRadius = searchItem.layer.cornerRadius > 0
+        ? searchItem.layer.cornerRadius : MIN(button.bounds.size.width, button.bounds.size.height) * 0.5;
     label.textColor = foreground ?: UIColor.labelColor;
 
     if (buttonIndex != NSNotFound && buttonIndex + 3 < items.count) {
@@ -909,13 +953,16 @@ static void QDRInstallShelfCheckinControls(QDRShelfNavView *navigationView) {
     label.layer.shadowRadius = 1;
     label.layer.shadowOffset = CGSizeMake(0, 1);
 
+    UIView *searchItem = stack.arrangedSubviews.firstObject;
     UIButton *button = [UIButton buttonWithType:UIButtonTypeSystem];
     button.accessibilityLabel = @"签到";
-    button.layer.cornerRadius = 20;
+    button.clipsToBounds = YES;
     button.imageView.contentMode = UIViewContentModeScaleAspectFit;
     [button setImage:QDRShelfCheckinImage() forState:UIControlStateNormal];
-    [button.widthAnchor constraintEqualToConstant:40].active = YES;
-    [button.heightAnchor constraintEqualToConstant:40].active = YES;
+    if (searchItem) {
+        [button.widthAnchor constraintEqualToAnchor:searchItem.widthAnchor].active = YES;
+        [button.heightAnchor constraintEqualToAnchor:searchItem.heightAnchor].active = YES;
+    }
     [button addTarget:[QDRAutoRunner shared] action:@selector(startFromShelfButton:) forControlEvents:UIControlEventTouchUpInside];
 
     [stack insertArrangedSubview:button atIndex:0];
@@ -928,6 +975,7 @@ static void QDRInstallShelfCheckinControls(QDRShelfNavView *navigationView) {
                                              object:nil];
     QDRUpdateShelfChapterCardLabel(navigationView);
     QDRLayoutShelfCheckinControls(navigationView);
+    [[QDRAutoRunner shared] refreshChapterCardFromMineAPI];
     QDRLog(@"bookshelf checkin UI installed stack=%@ originalItems=%lu icon=%d",
            NSStringFromClass(stack.class), (unsigned long)(stack.arrangedSubviews.count - 1), QDRShelfCheckinImage() != nil);
 }
@@ -948,6 +996,7 @@ static void QDRInstallShelfCheckinControls(QDRShelfNavView *navigationView) {
     QDRCollapseLeadReadHeadersInView(((UIViewController *)self).view);
     QDRShelfNavView *navigationView = QDRFindShelfNavigationView(((UIViewController *)self).view);
     if (navigationView) QDRInstallShelfCheckinControls(navigationView);
+    [[QDRAutoRunner shared] refreshChapterCardFromMineAPI];
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.3 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         QDRShelfNavView *delayedNavigationView = QDRFindShelfNavigationView(((UIViewController *)self).view);
         if (delayedNavigationView) QDRInstallShelfCheckinControls(delayedNavigationView);
@@ -959,6 +1008,7 @@ static void QDRInstallShelfCheckinControls(QDRShelfNavView *navigationView) {
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.35 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         QDRApplyShelfCollapsedLayout(self);
         QDRCollapseLeadReadHeadersInView(((UIViewController *)self).view);
+        [[QDRAutoRunner shared] refreshChapterCardFromMineAPI];
     });
 }
 %end
@@ -988,19 +1038,10 @@ static void QDRInstallShelfCheckinControls(QDRShelfNavView *navigationView) {
 
 %end
 
-%group QDRMineAccountHooks
-%hook QDRMineAccountInfoItemView
-- (void)layoutSubviews {
-    %orig;
-    QDRCaptureMineChapterCardCount(self);
-}
-%end
-%end
-
 %ctor {
     NSString *bundle = NSBundle.mainBundle.bundleIdentifier;
     if ([bundle isEqualToString:QDRTargetBundle] || [bundle isEqualToString:QDREnterpriseBundle]) {
-        QDRLog(@"loaded version=1.5.3 bundle=%@", bundle);
+        QDRLog(@"loaded version=1.5.4 bundle=%@", bundle);
         %init;
         Class shelfVC = objc_getClass("_TtC16QDReaderAppStore25QDBookShelfViewController");
         Class shelfHeader = objc_getClass("_TtC16QDReaderAppStore25QDBookShelfLeadReadHeader");
@@ -1012,12 +1053,6 @@ static void QDRInstallShelfCheckinControls(QDRShelfNavView *navigationView) {
                   QDRShelfNavView = shelfNav);
         } else {
             QDRLog(@"bookshelf hook unavailable vc=%d header=%d nav=%d", shelfVC != Nil, shelfHeader != Nil, shelfNav != Nil);
-        }
-        Class mineAccountItem = objc_getClass("_TtC16QDReaderAppStore27QDMineMyAccountInfoItemView");
-        if (mineAccountItem) {
-            %init(QDRMineAccountHooks, QDRMineAccountInfoItemView = mineAccountItem);
-        } else {
-            QDRLog(@"mine chapter-card item hook unavailable");
         }
     }
 }

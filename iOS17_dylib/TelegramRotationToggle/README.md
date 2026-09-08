@@ -30,5 +30,10 @@ Version 1.0.5 installs the control as an actual rightBarButtonItem instead of a
 window overlay. Telegram rewrites that array during chat-state updates, so the
 UINavigationItem setter keeps the toggle appended after Telegram's own items.
 
+Version 1.0.6 removes the custom UIButton view that Telegram's custom navigation
+bar reserved space for but did not render or route touches to. It now uses a
+standard image UIBarButtonItem with a retained target/action and prepends it so
+the item appears to the left of the avatar without stretching the avatar container.
+
 Target environment: iOS 17 and Dopamine-compatible injection. The package is
 scoped only to the two listed bundle identifiers and never injects SpringBoard.

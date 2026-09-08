@@ -237,3 +237,10 @@ PhoenixVideoAdSkip 1.1.1 正在修正“商城”Tab 实际路由到福利页导
 - 依据 Telegram 官方源码的 `updateRightNavigationButtons` 逻辑，改为真正追加到 `navigationItem.rightBarButtonItems`；同时 Hook 该数组更新，在 Telegram 重写按钮时自动补回控制项。
 - 独立公开仓库提交 `1f9516b`；仅 roothide 的 Actions run `34242486924` 成功，未创建 Release。
 - roothide 测试包：`C:\Users\liqiang\Downloads\com.swiftss.telegramrotationtoggle_1.0.5_iphoneos-arm64e.deb`；需实机确认导航按钮点击及旋转切换。
+
+## TelegramRotationToggle 1.0.6
+
+- 1.0.5 实机显示头像外框被拉宽，新增区域无图标且不可点击。这证明 bar item 已插入，但 Telegram 自定义 NavigationBar 不支持 `UIBarButtonItem(customView: UIButton)` 的渲染和事件映射。
+- 删除 customView、宽高约束及悬浮 UIButton，改用标准图片型 `UIBarButtonItem` 与强持有 target/action；将 200×200 素材归一化为 22×22，并调整数组顺序使其位于头像左侧。
+- 首次公开构建 run `34243646647` 因 SDK 头文件不声明 UIAction initializer 而失败，未交付；改为兼容的 target/action 后，提交 `f535bcf`、仅 roothide run `34243972871` 成功，未创建 Release。
+- roothide 测试包：`C:\Users\liqiang\Downloads\com.swiftss.telegramrotationtoggle_1.0.6_iphoneos-arm64e.deb`；需实机确认外框、图标和点击切换。

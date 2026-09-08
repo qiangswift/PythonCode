@@ -7,7 +7,6 @@
 #import <substrate.h>
 
 static NSString *const CRTLockedKey = @"com.swiftss.telegramrotationtoggle.locked";
-static const void *CRTButtonKey = &CRTButtonKey;
 static const void *CRTBarButtonKey = &CRTBarButtonKey;
 static const void *CRTNavigationToggleKey = &CRTNavigationToggleKey;
 static IMP CRTOriginalDelegateMask = NULL;
@@ -15,7 +14,12 @@ static Class CRTHookedDelegateClass = Nil;
 static BOOL CRTChatHooksInstalled = NO;
 static void (*CRTOriginalChatViewDidAppear)(id, SEL, BOOL) = NULL;
 static void (*CRTOriginalChatViewDidLayoutSubviews)(id, SEL) = NULL;
-static void (*CRTOriginalChatViewWillDisappear)(id, SEL, BOOL) = NULL;
+
+@interface CRTRotationToggleTarget : NSObject
+- (void)toggle:(UIBarButtonItem *)sender;
+@end
+
+static CRTRotationToggleTarget *CRTActionTarget = nil;
 
 static BOOL CRTIsLocked(void) {
     id storedValue = [NSUserDefaults.standardUserDefaults objectForKey:CRTLockedKey];
@@ -38,6 +42,13 @@ static UIImage *CRTIcon(BOOL locked) {
     UIImage *image = path ? [UIImage imageWithContentsOfFile:path] : nil;
     if (!image) {
         image = [UIImage systemImageNamed:locked ? @"lock.fill" : @"lock.open.fill"];
+    }
+    if (image && (image.size.width > 28.0 || image.size.height > 28.0)) {
+        UIGraphicsImageRenderer *renderer = [[UIGraphicsImageRenderer alloc]
+            initWithSize:CGSizeMake(22.0, 22.0)];
+        image = [renderer imageWithActions:^(UIGraphicsImageRendererContext *context) {
+            [image drawInRect:CGRectMake(0.0, 0.0, 22.0, 22.0)];
+        }];
     }
     return [image imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate];
 }
@@ -100,40 +111,32 @@ static void CRTRefreshOrientation(void) {
     });
 }
 
-static void CRTUpdateButton(UIButton *button) {
+static void CRTUpdateBarButton(UIBarButtonItem *barButton) {
     BOOL locked = CRTIsLocked();
     UIImage *icon = CRTIcon(locked);
-    if (icon) [button setImage:icon forState:UIControlStateNormal];
-    button.accessibilityLabel = locked ? @"启用随重力旋转" : @"锁定竖屏";
-    button.accessibilityValue = locked ? @"当前已锁定" : @"当前可旋转";
+    if (icon) barButton.image = icon;
+    barButton.accessibilityLabel = locked ? @"启用随重力旋转" : @"锁定竖屏";
+    barButton.accessibilityValue = locked ? @"当前已锁定" : @"当前可旋转";
 }
+
+@implementation CRTRotationToggleTarget
+- (void)toggle:(UIBarButtonItem *)sender {
+    BOOL locked = !CRTIsLocked();
+    [NSUserDefaults.standardUserDefaults setBool:locked forKey:CRTLockedKey];
+    CRTUpdateBarButton(sender);
+    CRTRefreshOrientation();
+}
+@end
 
 static void CRTInstallButton(UIViewController *controller) {
     if (!controller.isViewLoaded) return;
-    UIButton *button = objc_getAssociatedObject(controller, CRTButtonKey);
     UIBarButtonItem *barButton = objc_getAssociatedObject(controller, CRTBarButtonKey);
-    if (!button) {
-        button = [UIButton buttonWithType:UIButtonTypeSystem];
-        button.translatesAutoresizingMaskIntoConstraints = NO;
-        button.tintColor = UIColor.labelColor;
-        button.imageView.contentMode = UIViewContentModeScaleAspectFit;
-        button.accessibilityIdentifier = @"com.swiftss.telegramrotationtoggle.button";
-        __weak UIButton *weakButton = button;
-        UIAction *toggleAction = [UIAction actionWithHandler:^(__kindof UIAction *action) {
-            BOOL locked = !CRTIsLocked();
-            [NSUserDefaults.standardUserDefaults setBool:locked forKey:CRTLockedKey];
-            UIButton *strongButton = weakButton;
-            if (strongButton) CRTUpdateButton(strongButton);
-            CRTRefreshOrientation();
-        }];
-        [button addAction:toggleAction forControlEvents:UIControlEventTouchUpInside];
-        [NSLayoutConstraint activateConstraints:@[
-            [button.widthAnchor constraintEqualToConstant:36.0],
-            [button.heightAnchor constraintEqualToConstant:40.0]
-        ]];
-        barButton = [[UIBarButtonItem alloc] initWithCustomView:button];
-        objc_setAssociatedObject(controller, CRTButtonKey, button,
-            OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    if (!barButton) {
+        if (!CRTActionTarget) CRTActionTarget = [CRTRotationToggleTarget new];
+        barButton = [[UIBarButtonItem alloc] initWithImage:CRTIcon(CRTIsLocked())
+            style:UIBarButtonItemStylePlain target:CRTActionTarget
+            action:@selector(toggle:)];
+        barButton.accessibilityIdentifier = @"com.swiftss.telegramrotationtoggle.button";
         objc_setAssociatedObject(controller, CRTBarButtonKey, barButton,
             OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     }
@@ -143,11 +146,10 @@ static void CRTInstallButton(UIViewController *controller) {
         OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     NSArray<UIBarButtonItem *> *currentItems = navigationItem.rightBarButtonItems ?: @[];
     if (![currentItems containsObject:barButton]) {
-        [navigationItem setRightBarButtonItems:
-            [currentItems arrayByAddingObject:barButton] animated:NO];
+        [navigationItem setRightBarButtonItems:[@[barButton]
+            arrayByAddingObjectsFromArray:currentItems] animated:NO];
     }
-    button.hidden = NO;
-    CRTUpdateButton(button);
+    CRTUpdateBarButton(barButton);
 }
 
 static void CRTChatViewDidAppear(id self, SEL selector, BOOL animated) {
@@ -164,14 +166,6 @@ static void CRTChatViewDidLayoutSubviews(id self, SEL selector) {
     CRTInstallButton((UIViewController *)self);
 }
 
-static void CRTChatViewWillDisappear(id self, SEL selector, BOOL animated) {
-    if (CRTOriginalChatViewWillDisappear) {
-        CRTOriginalChatViewWillDisappear(self, selector, animated);
-    }
-    UIButton *button = objc_getAssociatedObject(self, CRTButtonKey);
-    button.hidden = YES;
-}
-
 static void CRTHookChatControllerIfAvailable(void) {
     if (CRTChatHooksInstalled) return;
     Class chatClass = NSClassFromString(@"_TtC10TelegramUI18ChatControllerImpl");
@@ -182,9 +176,6 @@ static void CRTHookChatControllerIfAvailable(void) {
     MSHookMessageEx(chatClass, @selector(viewDidLayoutSubviews),
         (IMP)CRTChatViewDidLayoutSubviews,
         (IMP *)&CRTOriginalChatViewDidLayoutSubviews);
-    MSHookMessageEx(chatClass, @selector(viewWillDisappear:),
-        (IMP)CRTChatViewWillDisappear,
-        (IMP *)&CRTOriginalChatViewWillDisappear);
     CRTChatHooksInstalled = YES;
 }
 
@@ -216,14 +207,6 @@ static void CRTImageAdded(const struct mach_header *header, intptr_t slide) {
     }
 }
 
-- (void)viewWillDisappear:(BOOL)animated {
-    %orig;
-    if (CRTIsChatController(self)) {
-        UIButton *button = objc_getAssociatedObject(self, CRTButtonKey);
-        button.hidden = YES;
-    }
-}
-
 - (UIInterfaceOrientationMask)supportedInterfaceOrientations {
     if (CRTIsLocked()) return UIInterfaceOrientationMaskPortrait;
     return %orig;
@@ -239,7 +222,7 @@ static void CRTImageAdded(const struct mach_header *header, intptr_t slide) {
 - (void)setRightBarButtonItems:(NSArray<UIBarButtonItem *> *)items animated:(BOOL)animated {
     UIBarButtonItem *toggleItem = objc_getAssociatedObject(self, CRTNavigationToggleKey);
     if (toggleItem && ![items containsObject:toggleItem]) {
-        items = [(items ?: @[]) arrayByAddingObject:toggleItem];
+        items = [@[toggleItem] arrayByAddingObjectsFromArray:(items ?: @[])];
     }
     %orig(items, animated);
 }

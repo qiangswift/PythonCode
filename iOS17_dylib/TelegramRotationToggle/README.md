@@ -41,5 +41,10 @@ item with the avatar. The control is now an independent circular UIButton inside
 Telegram's navigation-bar view, with a UIButton-specific action and no effect on
 the avatar item's layout.
 
+Version 1.0.8 no longer assumes Telegram's controller `navigationBar` property is
+the visible container. It presents the independent button in a non-key overlay
+UIWindow above Telegram's navigation UI. The window's hitTest returns a view only
+inside the button, so all other touches pass through to Telegram unchanged.
+
 Target environment: iOS 17 and Dopamine-compatible injection. The package is
 scoped only to the two listed bundle identifiers and never injects SpringBoard.

@@ -8,18 +8,32 @@
 #import <substrate.h>
 
 static NSString *const CRTLockedKey = @"com.swiftss.telegramrotationtoggle.locked";
-static const void *CRTButtonKey = &CRTButtonKey;
 static IMP CRTOriginalDelegateMask = NULL;
 static Class CRTHookedDelegateClass = Nil;
 static BOOL CRTChatHooksInstalled = NO;
 static void (*CRTOriginalChatViewDidAppear)(id, SEL, BOOL) = NULL;
 static void (*CRTOriginalChatViewDidLayoutSubviews)(id, SEL) = NULL;
 
+@interface CRTPassthroughWindow : UIWindow
+@property (nonatomic, weak) UIButton *touchButton;
+@end
+
+@implementation CRTPassthroughWindow
+- (UIView *)hitTest:(CGPoint)point withEvent:(UIEvent *)event {
+    UIButton *button = self.touchButton;
+    if (!button || button.hidden || !button.userInteractionEnabled) return nil;
+    CGPoint buttonPoint = [button convertPoint:point fromView:self];
+    if (![button pointInside:buttonPoint withEvent:event]) return nil;
+    return [button hitTest:buttonPoint withEvent:event] ?: button;
+}
+@end
+
 @interface CRTRotationToggleTarget : NSObject
 - (void)toggle:(UIButton *)sender;
 @end
 
 static CRTRotationToggleTarget *CRTActionTarget = nil;
+static CRTPassthroughWindow *CRTOverlayWindow = nil;
 
 static BOOL CRTIsLocked(void) {
     id storedValue = [NSUserDefaults.standardUserDefaults objectForKey:CRTLockedKey];
@@ -128,28 +142,22 @@ static void CRTUpdateButton(UIButton *button) {
 }
 @end
 
-static UIView *CRTNavigationBarView(UIViewController *controller) {
-    SEL navigationBarSelector = NSSelectorFromString(@"navigationBar");
-    if ([controller respondsToSelector:navigationBarSelector]) {
-        id candidate = ((id (*)(id, SEL))objc_msgSend)(controller, navigationBarSelector);
-        if ([candidate isKindOfClass:UIView.class]) return candidate;
-    }
-    return controller.navigationController.navigationBar;
-}
-
 static void CRTInstallButton(UIViewController *controller) {
-    if (!controller.isViewLoaded) return;
-    UIView *navigationBar = CRTNavigationBarView(controller);
-    if (!navigationBar) return;
+    UIWindowScene *scene = controller.view.window.windowScene;
+    if (!scene) return;
 
-    UIButton *button = objc_getAssociatedObject(controller, CRTButtonKey);
-    if (button && button.superview != navigationBar) {
-        [button removeFromSuperview];
-        button = nil;
-    }
-    if (!button) {
+    if (!CRTOverlayWindow || CRTOverlayWindow.windowScene != scene) {
+        CRTOverlayWindow.hidden = YES;
+        CRTOverlayWindow = [[CRTPassthroughWindow alloc] initWithWindowScene:scene];
+        CRTOverlayWindow.windowLevel = UIWindowLevelAlert - 1.0;
+        CRTOverlayWindow.backgroundColor = UIColor.clearColor;
+
+        UIViewController *overlayController = [UIViewController new];
+        overlayController.view.backgroundColor = UIColor.clearColor;
+        CRTOverlayWindow.rootViewController = overlayController;
+
         if (!CRTActionTarget) CRTActionTarget = [CRTRotationToggleTarget new];
-        button = [UIButton buttonWithType:UIButtonTypeSystem];
+        UIButton *button = [UIButton buttonWithType:UIButtonTypeSystem];
         button.translatesAutoresizingMaskIntoConstraints = NO;
         button.tintColor = UIColor.labelColor;
         button.backgroundColor = [UIColor colorWithWhite:0.15 alpha:0.92];
@@ -158,20 +166,23 @@ static void CRTInstallButton(UIViewController *controller) {
         button.accessibilityIdentifier = @"com.swiftss.telegramrotationtoggle.button";
         [button addTarget:CRTActionTarget action:@selector(toggle:)
             forControlEvents:UIControlEventTouchUpInside];
-        [navigationBar addSubview:button];
+        [overlayController.view addSubview:button];
         [NSLayoutConstraint activateConstraints:@[
             [button.widthAnchor constraintEqualToConstant:40.0],
             [button.heightAnchor constraintEqualToConstant:40.0],
-            [button.centerYAnchor constraintEqualToAnchor:navigationBar.centerYAnchor],
-            [button.trailingAnchor constraintEqualToAnchor:navigationBar.trailingAnchor
+            [button.topAnchor constraintEqualToAnchor:
+                overlayController.view.safeAreaLayoutGuide.topAnchor constant:2.0],
+            [button.trailingAnchor constraintEqualToAnchor:
+                overlayController.view.safeAreaLayoutGuide.trailingAnchor
                 constant:-66.0]
         ]];
-        objc_setAssociatedObject(controller, CRTButtonKey, button,
-            OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        CRTOverlayWindow.touchButton = button;
     }
+
+    UIButton *button = CRTOverlayWindow.touchButton;
     button.hidden = NO;
-    [navigationBar bringSubviewToFront:button];
     CRTUpdateButton(button);
+    CRTOverlayWindow.hidden = NO;
 }
 
 static void CRTChatViewDidAppear(id self, SEL selector, BOOL animated) {
@@ -232,8 +243,7 @@ static void CRTImageAdded(const struct mach_header *header, intptr_t slide) {
 - (void)viewWillDisappear:(BOOL)animated {
     %orig;
     if (CRTIsChatController(self)) {
-        UIButton *button = objc_getAssociatedObject(self, CRTButtonKey);
-        button.hidden = YES;
+        CRTOverlayWindow.hidden = YES;
     }
 }
 

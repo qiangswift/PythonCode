@@ -13,5 +13,9 @@ to the left of the contact or group avatar.
 The implementation was informed by static analysis of user-supplied decrypted
 Telegram 12.9.3 and Swiftgram 12.9.2 binaries. The IPAs are not distributed.
 
+Version 1.0.2 installs the chat-controller hooks when TelegramUIFramework is
+actually loaded. This avoids the one-shot startup race caused by Swift classes
+that are not yet registered when the tweak constructor runs.
+
 Target environment: iOS 17 and Dopamine-compatible injection. The package is
 scoped only to the two listed bundle identifiers and never injects SpringBoard.

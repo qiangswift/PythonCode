@@ -208,3 +208,11 @@ PhoenixVideoAdSkip 1.1.1 正在修正“商城”Tab 实际路由到福利页导
 - 按用户要求仅构建 roothide。公开仓库 Actions run `34238499927` 成功。
 - roothide 测试包：`C:\Users\liqiang\Downloads\com.swiftss.telegramrotationtoggle_1.0.1_iphoneos-arm64e.deb`。
 - 尚需实机确认 Telegram 与 Swiftgram 中按钮显示、切换状态及旋转行为。
+
+## TelegramRotationToggle 1.0.2
+
+- 1.0.1 实机确认 Telegram 默认竖屏锁定已生效，但聊天页切换图标仍不出现，说明通用旋转 Hook 生效而聊天控制器 Hook 未命中。
+- 对 Telegram 12.9.3 的 `TelegramUIFramework` 二进制复核确认 `_TtC10TelegramUI18ChatControllerImpl` 类名正确；根因是 Swift framework 晚于 tweak 构造函数加载，Logos 启动时的一次性类查找无法安装该 Hook。
+- 改为通过 dyld image-added 回调等待 framework 装载，并在类注册后使用 `MSHookMessageEx` 动态 Hook `viewDidAppear:`、`viewDidLayoutSubviews` 和 `viewWillDisappear:`。
+- 独立公开仓库提交 `6cd6c42`；仅 roothide 的 Actions run `34239660492` 成功，未创建 Release。
+- roothide 测试包：`C:\Users\liqiang\Downloads\com.swiftss.telegramrotationtoggle_1.0.2_iphoneos-arm64e.deb`；图标显示及点击切换仍需实机确认。

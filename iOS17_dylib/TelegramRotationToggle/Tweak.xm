@@ -3,11 +3,17 @@
 #import <objc/message.h>
 #import <objc/runtime.h>
 #import <dlfcn.h>
+#import <mach-o/dyld.h>
+#import <substrate.h>
 
 static NSString *const CRTLockedKey = @"com.swiftss.telegramrotationtoggle.locked";
 static const void *CRTButtonKey = &CRTButtonKey;
 static IMP CRTOriginalDelegateMask = NULL;
 static Class CRTHookedDelegateClass = Nil;
+static BOOL CRTChatHooksInstalled = NO;
+static void (*CRTOriginalChatViewDidAppear)(id, SEL, BOOL) = NULL;
+static void (*CRTOriginalChatViewDidLayoutSubviews)(id, SEL) = NULL;
+static void (*CRTOriginalChatViewWillDisappear)(id, SEL, BOOL) = NULL;
 
 static BOOL CRTIsLocked(void) {
     id storedValue = [NSUserDefaults.standardUserDefaults objectForKey:CRTLockedKey];
@@ -126,6 +132,61 @@ static void CRTInstallButton(UIViewController *controller) {
     CRTUpdateButton(button);
 }
 
+static void CRTToggleRotationLock(id controller, SEL selector) {
+    BOOL locked = !CRTIsLocked();
+    [NSUserDefaults.standardUserDefaults setBool:locked forKey:CRTLockedKey];
+    UIButton *button = objc_getAssociatedObject(controller, CRTButtonKey);
+    if (button) CRTUpdateButton(button);
+    CRTRefreshOrientation();
+}
+
+static void CRTChatViewDidAppear(id self, SEL selector, BOOL animated) {
+    if (CRTOriginalChatViewDidAppear) {
+        CRTOriginalChatViewDidAppear(self, selector, animated);
+    }
+    CRTInstallButton((UIViewController *)self);
+}
+
+static void CRTChatViewDidLayoutSubviews(id self, SEL selector) {
+    if (CRTOriginalChatViewDidLayoutSubviews) {
+        CRTOriginalChatViewDidLayoutSubviews(self, selector);
+    }
+    UIButton *button = objc_getAssociatedObject(self, CRTButtonKey);
+    if (button.superview) [button.superview bringSubviewToFront:button];
+}
+
+static void CRTChatViewWillDisappear(id self, SEL selector, BOOL animated) {
+    if (CRTOriginalChatViewWillDisappear) {
+        CRTOriginalChatViewWillDisappear(self, selector, animated);
+    }
+    UIButton *button = objc_getAssociatedObject(self, CRTButtonKey);
+    button.hidden = YES;
+}
+
+static void CRTHookChatControllerIfAvailable(void) {
+    if (CRTChatHooksInstalled) return;
+    Class chatClass = NSClassFromString(@"_TtC10TelegramUI18ChatControllerImpl");
+    if (!chatClass) return;
+
+    class_addMethod(chatClass, @selector(crt_toggleRotationLock),
+        (IMP)CRTToggleRotationLock, "v@:");
+    MSHookMessageEx(chatClass, @selector(viewDidAppear:),
+        (IMP)CRTChatViewDidAppear, (IMP *)&CRTOriginalChatViewDidAppear);
+    MSHookMessageEx(chatClass, @selector(viewDidLayoutSubviews),
+        (IMP)CRTChatViewDidLayoutSubviews,
+        (IMP *)&CRTOriginalChatViewDidLayoutSubviews);
+    MSHookMessageEx(chatClass, @selector(viewWillDisappear:),
+        (IMP)CRTChatViewWillDisappear,
+        (IMP *)&CRTOriginalChatViewWillDisappear);
+    CRTChatHooksInstalled = YES;
+}
+
+static void CRTImageAdded(const struct mach_header *header, intptr_t slide) {
+    dispatch_async(dispatch_get_main_queue(), ^{
+        CRTHookChatControllerIfAvailable();
+    });
+}
+
 %hook UIApplication
 - (UIInterfaceOrientationMask)supportedInterfaceOrientationsForWindow:(UIWindow *)window {
     if (CRTIsLocked()) return UIInterfaceOrientationMaskPortrait;
@@ -145,50 +206,26 @@ static void CRTInstallButton(UIViewController *controller) {
 }
 %end
 
-%hook _TtC10TelegramUI18ChatControllerImpl
-- (void)viewDidAppear:(BOOL)animated {
-    %orig;
-    CRTInstallButton((UIViewController *)self);
-}
-
-- (void)viewDidLayoutSubviews {
-    %orig;
-    UIButton *button = objc_getAssociatedObject(self, CRTButtonKey);
-    if (button.superview) [button.superview bringSubviewToFront:button];
-}
-
-- (void)viewWillDisappear:(BOOL)animated {
-    %orig;
-    UIButton *button = objc_getAssociatedObject(self, CRTButtonKey);
-    button.hidden = YES;
-}
-
-%new
-- (void)crt_toggleRotationLock {
-    BOOL locked = !CRTIsLocked();
-    [NSUserDefaults.standardUserDefaults setBool:locked forKey:CRTLockedKey];
-    UIButton *button = objc_getAssociatedObject(self, CRTButtonKey);
-    if (button) CRTUpdateButton(button);
-    CRTRefreshOrientation();
-}
-%end
-
 %ctor {
     @autoreleasepool {
         NSString *bundle = NSBundle.mainBundle.bundleIdentifier;
         if (![bundle isEqualToString:@"ph.telegra.Telegraph"] &&
             ![bundle isEqualToString:@"app.swiftgram.ios"]) return;
         %init;
+        _dyld_register_func_for_add_image(CRTImageAdded);
+        CRTHookChatControllerIfAvailable();
         [NSNotificationCenter.defaultCenter
             addObserverForName:UIApplicationDidFinishLaunchingNotification
             object:nil queue:NSOperationQueue.mainQueue usingBlock:^(NSNotification *note) {
                 CRTHookApplicationDelegate();
+                CRTHookChatControllerIfAvailable();
                 if (CRTIsLocked()) CRTRefreshOrientation();
             }];
         [NSNotificationCenter.defaultCenter
             addObserverForName:UIApplicationDidBecomeActiveNotification
             object:nil queue:NSOperationQueue.mainQueue usingBlock:^(NSNotification *note) {
                 CRTHookApplicationDelegate();
+                CRTHookChatControllerIfAvailable();
                 if (CRTIsLocked()) CRTRefreshOrientation();
             }];
     }

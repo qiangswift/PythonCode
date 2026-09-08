@@ -7,7 +7,8 @@ to the left of the contact or group avatar.
 - Unlocked icon: the app keeps its original gravity-based rotation behavior.
 - Locked icon: the app immediately returns to portrait and remains portrait-only.
 - The setting is persisted independently inside each app's sandbox.
-- Default state is unlocked, preserving the original app behavior until changed.
+- Default state is locked. Tap the unlocked/locked icon to restore or disable
+  the app's original gravity-based rotation behavior.
 
 The implementation was informed by static analysis of user-supplied decrypted
 Telegram 12.9.3 and Swiftgram 12.9.2 binaries. The IPAs are not distributed.

@@ -10,7 +10,8 @@ static IMP CRTOriginalDelegateMask = NULL;
 static Class CRTHookedDelegateClass = Nil;
 
 static BOOL CRTIsLocked(void) {
-    return [NSUserDefaults.standardUserDefaults boolForKey:CRTLockedKey];
+    id storedValue = [NSUserDefaults.standardUserDefaults objectForKey:CRTLockedKey];
+    return storedValue ? [storedValue boolValue] : YES;
 }
 
 static NSString *CRTResourcePath(NSString *name) {
@@ -93,7 +94,13 @@ static void CRTUpdateButton(UIButton *button) {
 
 static void CRTInstallButton(UIViewController *controller) {
     if (!controller.isViewLoaded || !controller.view.window) return;
+    UIWindow *window = controller.view.window;
     UIButton *button = objc_getAssociatedObject(controller, CRTButtonKey);
+    if (button && button.superview != window) {
+        [button removeFromSuperview];
+        objc_setAssociatedObject(controller, CRTButtonKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        button = nil;
+    }
     if (!button) {
         button = [UIButton buttonWithType:UIButtonTypeSystem];
         button.translatesAutoresizingMaskIntoConstraints = NO;
@@ -102,19 +109,20 @@ static void CRTInstallButton(UIViewController *controller) {
         button.accessibilityIdentifier = @"com.swiftss.telegramrotationtoggle.button";
         [button addTarget:controller action:@selector(crt_toggleRotationLock)
             forControlEvents:UIControlEventTouchUpInside];
-        [controller.view addSubview:button];
+        [window addSubview:button];
         [NSLayoutConstraint activateConstraints:@[
             [button.widthAnchor constraintEqualToConstant:40.0],
             [button.heightAnchor constraintEqualToConstant:40.0],
-            [button.topAnchor constraintEqualToAnchor:controller.view.safeAreaLayoutGuide.topAnchor
+            [button.topAnchor constraintEqualToAnchor:window.safeAreaLayoutGuide.topAnchor
                 constant:2.0],
-            [button.trailingAnchor constraintEqualToAnchor:controller.view.safeAreaLayoutGuide.trailingAnchor
+            [button.trailingAnchor constraintEqualToAnchor:window.safeAreaLayoutGuide.trailingAnchor
                 constant:-52.0]
         ]];
         objc_setAssociatedObject(controller, CRTButtonKey, button,
             OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     }
-    [controller.view bringSubviewToFront:button];
+    button.hidden = NO;
+    [window bringSubviewToFront:button];
     CRTUpdateButton(button);
 }
 
@@ -146,8 +154,13 @@ static void CRTInstallButton(UIViewController *controller) {
 - (void)viewDidLayoutSubviews {
     %orig;
     UIButton *button = objc_getAssociatedObject(self, CRTButtonKey);
-    UIViewController *controller = (UIViewController *)self;
-    if (button) [controller.view bringSubviewToFront:button];
+    if (button.superview) [button.superview bringSubviewToFront:button];
+}
+
+- (void)viewWillDisappear:(BOOL)animated {
+    %orig;
+    UIButton *button = objc_getAssociatedObject(self, CRTButtonKey);
+    button.hidden = YES;
 }
 
 %new
@@ -165,8 +178,15 @@ static void CRTInstallButton(UIViewController *controller) {
         NSString *bundle = NSBundle.mainBundle.bundleIdentifier;
         if (![bundle isEqualToString:@"ph.telegra.Telegraph"] &&
             ![bundle isEqualToString:@"app.swiftgram.ios"]) return;
+        %init;
         [NSNotificationCenter.defaultCenter
             addObserverForName:UIApplicationDidFinishLaunchingNotification
+            object:nil queue:NSOperationQueue.mainQueue usingBlock:^(NSNotification *note) {
+                CRTHookApplicationDelegate();
+                if (CRTIsLocked()) CRTRefreshOrientation();
+            }];
+        [NSNotificationCenter.defaultCenter
+            addObserverForName:UIApplicationDidBecomeActiveNotification
             object:nil queue:NSOperationQueue.mainQueue usingBlock:^(NSNotification *note) {
                 CRTHookApplicationDelegate();
                 if (CRTIsLocked()) CRTRefreshOrientation();

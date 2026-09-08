@@ -258,3 +258,10 @@ PhoenixVideoAdSkip 1.1.1 正在修正“商城”Tab 实际路由到福利页导
 - 改用独立、非 Key 的透明 Overlay Window，层级位于 Telegram 导航 UI 上方；自定义 hitTest 仅让 40×40 锁按钮接收触摸，其余区域全部穿透，不影响头像和聊天操作。
 - 独立公开仓库提交 `54bb8e8`；仅 roothide 的 Actions run `34245716738` 成功，未创建 Release。
 - roothide 测试包：`C:\Users\liqiang\Downloads\com.swiftss.telegramrotationtoggle_1.0.8_iphoneos-arm64e.deb`；需实机确认显示、点击换图和旋转。
+
+## TelegramRotationToggle 1.0.9
+
+- 1.0.8 实机确认功能全部正确；遗留问题是按钮圆形背景不需要，以及返回首页后 Overlay 残留。后者源于 Telegram 未稳定转发聊天页 `viewWillDisappear:`，独立窗口不会自动跟随页面销毁。
+- 按钮背景改为完全透明，仅保留锁图标和透明 40×40 点击区域；在任何不属于聊天层级的控制器 `viewWillAppear:`、`viewDidAppear:` 时主动隐藏 Overlay，并排除 Overlay 自己的根控制器。
+- 独立公开仓库提交 `fd8ffb5`；仅 roothide 的 Actions run `34246833575` 成功，未创建 Release。
+- roothide 测试包：`C:\Users\liqiang\Downloads\com.swiftss.telegramrotationtoggle_1.0.9_iphoneos-arm64e.deb`；需实机确认首页不残留及透明图标效果。

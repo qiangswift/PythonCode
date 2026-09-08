@@ -7,6 +7,6 @@ include $(THEOS)/makefiles/common.mk
 TWEAK_NAME = TelegramRotationToggle
 TelegramRotationToggle_FILES = Tweak.xm
 TelegramRotationToggle_CFLAGS = -fobjc-arc
-TelegramRotationToggle_FRAMEWORKS = UIKit Foundation QuartzCore
+TelegramRotationToggle_FRAMEWORKS = UIKit Foundation
 
 include $(THEOS_MAKE_PATH)/tweak.mk

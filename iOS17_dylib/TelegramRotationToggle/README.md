@@ -46,5 +46,10 @@ the visible container. It presents the independent button in a non-key overlay
 UIWindow above Telegram's navigation UI. The window's hitTest returns a view only
 inside the button, so all other touches pass through to Telegram unchanged.
 
+Version 1.0.9 removes the visible circular button background while preserving the
+40-point touch target. It also hides the overlay from both viewWillAppear and
+viewDidAppear of controllers outside the active chat hierarchy, because Telegram
+does not consistently forward viewWillDisappear when returning to its home page.
+
 Target environment: iOS 17 and Dopamine-compatible injection. The package is
 scoped only to the two listed bundle identifiers and never injects SpringBoard.

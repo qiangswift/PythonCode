@@ -1,6 +1,5 @@
 #import <UIKit/UIKit.h>
 #import <Foundation/Foundation.h>
-#import <QuartzCore/QuartzCore.h>
 #import <objc/message.h>
 #import <objc/runtime.h>
 #import <dlfcn.h>
@@ -8,6 +7,7 @@
 #import <substrate.h>
 
 static NSString *const CRTLockedKey = @"com.swiftss.telegramrotationtoggle.locked";
+static const void *CRTOverlayControllerKey = &CRTOverlayControllerKey;
 static IMP CRTOriginalDelegateMask = NULL;
 static Class CRTHookedDelegateClass = Nil;
 static BOOL CRTChatHooksInstalled = NO;
@@ -70,6 +70,13 @@ static UIImage *CRTIcon(BOOL locked) {
 static BOOL CRTIsChatController(id controller) {
     return [NSStringFromClass([controller class])
         isEqualToString:@"_TtC10TelegramUI18ChatControllerImpl"];
+}
+
+static BOOL CRTControllerBelongsToChat(UIViewController *controller) {
+    for (UIViewController *current = controller; current; current = current.parentViewController) {
+        if (CRTIsChatController(current)) return YES;
+    }
+    return NO;
 }
 
 static UIInterfaceOrientationMask CRTDelegateMask(id self, SEL selector,
@@ -154,15 +161,15 @@ static void CRTInstallButton(UIViewController *controller) {
 
         UIViewController *overlayController = [UIViewController new];
         overlayController.view.backgroundColor = UIColor.clearColor;
+        objc_setAssociatedObject(overlayController, CRTOverlayControllerKey, @YES,
+            OBJC_ASSOCIATION_RETAIN_NONATOMIC);
         CRTOverlayWindow.rootViewController = overlayController;
 
         if (!CRTActionTarget) CRTActionTarget = [CRTRotationToggleTarget new];
         UIButton *button = [UIButton buttonWithType:UIButtonTypeSystem];
         button.translatesAutoresizingMaskIntoConstraints = NO;
         button.tintColor = UIColor.labelColor;
-        button.backgroundColor = [UIColor colorWithWhite:0.15 alpha:0.92];
-        button.layer.cornerRadius = 20.0;
-        button.clipsToBounds = YES;
+        button.backgroundColor = UIColor.clearColor;
         button.accessibilityIdentifier = @"com.swiftss.telegramrotationtoggle.button";
         [button addTarget:CRTActionTarget action:@selector(toggle:)
             forControlEvents:UIControlEventTouchUpInside];
@@ -226,10 +233,23 @@ static void CRTImageAdded(const struct mach_header *header, intptr_t slide) {
 %end
 
 %hook UIViewController
+- (void)viewWillAppear:(BOOL)animated {
+    %orig;
+    BOOL isOverlayController = [objc_getAssociatedObject(self, CRTOverlayControllerKey) boolValue];
+    if (!isOverlayController && !CRTControllerBelongsToChat(self)) {
+        CRTOverlayWindow.hidden = YES;
+    }
+}
+
 - (void)viewDidAppear:(BOOL)animated {
     %orig;
     if (CRTIsChatController(self)) {
         CRTInstallButton(self);
+    } else {
+        BOOL isOverlayController = [objc_getAssociatedObject(self, CRTOverlayControllerKey) boolValue];
+        if (!isOverlayController && !CRTControllerBelongsToChat(self)) {
+            CRTOverlayWindow.hidden = YES;
+        }
     }
 }
 

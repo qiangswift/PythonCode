@@ -17,5 +17,10 @@ Version 1.0.2 installs the chat-controller hooks when TelegramUIFramework is
 actually loaded. This avoids the one-shot startup race caused by Swift classes
 that are not yet registered when the tweak constructor runs.
 
+Version 1.0.3 also detects ChatControllerImpl from the UIViewController
+lifecycle that Telegram calls through `super`. This provides a path independent
+of direct Swift-class hooking, and uses SF Symbols if packaged icons cannot be
+resolved in a roothide path.
+
 Target environment: iOS 17 and Dopamine-compatible injection. The package is
 scoped only to the two listed bundle identifiers and never injects SpringBoard.

@@ -216,3 +216,10 @@ PhoenixVideoAdSkip 1.1.1 正在修正“商城”Tab 实际路由到福利页导
 - 改为通过 dyld image-added 回调等待 framework 装载，并在类注册后使用 `MSHookMessageEx` 动态 Hook `viewDidAppear:`、`viewDidLayoutSubviews` 和 `viewWillDisappear:`。
 - 独立公开仓库提交 `6cd6c42`；仅 roothide 的 Actions run `34239660492` 成功，未创建 Release。
 - roothide 测试包：`C:\Users\liqiang\Downloads\com.swiftss.telegramrotationtoggle_1.0.2_iphoneos-arm64e.deb`；图标显示及点击切换仍需实机确认。
+
+## TelegramRotationToggle 1.0.3
+
+- 1.0.2 实机仍未显示图标。包内容确认 PNG 已正确安装，因此增加不依赖 Swift 类直接 Hook 的路径：利用官方源码已确认的 `ChatControllerImpl.viewDidAppear -> super.viewDidAppear` 调用，在 `UIViewController` 生命周期 Hook 中按实际类名识别聊天页并安装按钮。
+- 图片加载增加 SF Symbols 兜底，避免 roothide 路径解析失败时出现透明按钮。
+- 独立公开仓库提交 `a191965`；仅 roothide 的 Actions run `34240409273` 成功，未创建 Release。
+- roothide 测试包：`C:\Users\liqiang\Downloads\com.swiftss.telegramrotationtoggle_1.0.3_iphoneos-arm64e.deb`；仍需实机确认图标显示和切换。

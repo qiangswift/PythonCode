@@ -34,7 +34,15 @@ static NSString *CRTResourcePath(NSString *name) {
 static UIImage *CRTIcon(BOOL locked) {
     NSString *path = CRTResourcePath(locked ? @"locked.png" : @"unlocked.png");
     UIImage *image = path ? [UIImage imageWithContentsOfFile:path] : nil;
+    if (!image) {
+        image = [UIImage systemImageNamed:locked ? @"lock.fill" : @"lock.open.fill"];
+    }
     return [image imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate];
+}
+
+static BOOL CRTIsChatController(id controller) {
+    return [NSStringFromClass([controller class])
+        isEqualToString:@"_TtC10TelegramUI18ChatControllerImpl"];
 }
 
 static UIInterfaceOrientationMask CRTDelegateMask(id self, SEL selector,
@@ -195,6 +203,29 @@ static void CRTImageAdded(const struct mach_header *header, intptr_t slide) {
 %end
 
 %hook UIViewController
+- (void)viewDidAppear:(BOOL)animated {
+    %orig;
+    if (CRTIsChatController(self)) {
+        CRTInstallButton(self);
+    }
+}
+
+- (void)viewDidLayoutSubviews {
+    %orig;
+    if (CRTIsChatController(self)) {
+        UIButton *button = objc_getAssociatedObject(self, CRTButtonKey);
+        if (button.superview) [button.superview bringSubviewToFront:button];
+    }
+}
+
+- (void)viewWillDisappear:(BOOL)animated {
+    %orig;
+    if (CRTIsChatController(self)) {
+        UIButton *button = objc_getAssociatedObject(self, CRTButtonKey);
+        button.hidden = YES;
+    }
+}
+
 - (UIInterfaceOrientationMask)supportedInterfaceOrientations {
     if (CRTIsLocked()) return UIInterfaceOrientationMaskPortrait;
     return %orig;

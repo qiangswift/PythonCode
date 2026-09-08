@@ -8,6 +8,8 @@
 
 static NSString *const CRTLockedKey = @"com.swiftss.telegramrotationtoggle.locked";
 static const void *CRTButtonKey = &CRTButtonKey;
+static const void *CRTBarButtonKey = &CRTBarButtonKey;
+static const void *CRTNavigationToggleKey = &CRTNavigationToggleKey;
 static IMP CRTOriginalDelegateMask = NULL;
 static Class CRTHookedDelegateClass = Nil;
 static BOOL CRTChatHooksInstalled = NO;
@@ -107,14 +109,9 @@ static void CRTUpdateButton(UIButton *button) {
 }
 
 static void CRTInstallButton(UIViewController *controller) {
-    if (!controller.isViewLoaded || !controller.view.window) return;
-    UIWindow *window = controller.view.window;
+    if (!controller.isViewLoaded) return;
     UIButton *button = objc_getAssociatedObject(controller, CRTButtonKey);
-    if (button && button.superview != window) {
-        [button removeFromSuperview];
-        objc_setAssociatedObject(controller, CRTButtonKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-        button = nil;
-    }
+    UIBarButtonItem *barButton = objc_getAssociatedObject(controller, CRTBarButtonKey);
     if (!button) {
         button = [UIButton buttonWithType:UIButtonTypeSystem];
         button.translatesAutoresizingMaskIntoConstraints = NO;
@@ -130,20 +127,26 @@ static void CRTInstallButton(UIViewController *controller) {
             CRTRefreshOrientation();
         }];
         [button addAction:toggleAction forControlEvents:UIControlEventTouchUpInside];
-        [window addSubview:button];
         [NSLayoutConstraint activateConstraints:@[
-            [button.widthAnchor constraintEqualToConstant:40.0],
-            [button.heightAnchor constraintEqualToConstant:40.0],
-            [button.topAnchor constraintEqualToAnchor:window.safeAreaLayoutGuide.topAnchor
-                constant:2.0],
-            [button.trailingAnchor constraintEqualToAnchor:window.safeAreaLayoutGuide.trailingAnchor
-                constant:-52.0]
+            [button.widthAnchor constraintEqualToConstant:36.0],
+            [button.heightAnchor constraintEqualToConstant:40.0]
         ]];
+        barButton = [[UIBarButtonItem alloc] initWithCustomView:button];
         objc_setAssociatedObject(controller, CRTButtonKey, button,
             OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        objc_setAssociatedObject(controller, CRTBarButtonKey, barButton,
+            OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    }
+
+    UINavigationItem *navigationItem = controller.navigationItem;
+    objc_setAssociatedObject(navigationItem, CRTNavigationToggleKey, barButton,
+        OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    NSArray<UIBarButtonItem *> *currentItems = navigationItem.rightBarButtonItems ?: @[];
+    if (![currentItems containsObject:barButton]) {
+        [navigationItem setRightBarButtonItems:
+            [currentItems arrayByAddingObject:barButton] animated:NO];
     }
     button.hidden = NO;
-    [window bringSubviewToFront:button];
     CRTUpdateButton(button);
 }
 
@@ -158,8 +161,7 @@ static void CRTChatViewDidLayoutSubviews(id self, SEL selector) {
     if (CRTOriginalChatViewDidLayoutSubviews) {
         CRTOriginalChatViewDidLayoutSubviews(self, selector);
     }
-    UIButton *button = objc_getAssociatedObject(self, CRTButtonKey);
-    if (button.superview) [button.superview bringSubviewToFront:button];
+    CRTInstallButton((UIViewController *)self);
 }
 
 static void CRTChatViewWillDisappear(id self, SEL selector, BOOL animated) {
@@ -210,8 +212,7 @@ static void CRTImageAdded(const struct mach_header *header, intptr_t slide) {
 - (void)viewDidLayoutSubviews {
     %orig;
     if (CRTIsChatController(self)) {
-        UIButton *button = objc_getAssociatedObject(self, CRTButtonKey);
-        if (button.superview) [button.superview bringSubviewToFront:button];
+        CRTInstallButton(self);
     }
 }
 
@@ -231,6 +232,16 @@ static void CRTImageAdded(const struct mach_header *header, intptr_t slide) {
 - (BOOL)shouldAutorotate {
     if (CRTIsLocked()) return NO;
     return %orig;
+}
+%end
+
+%hook UINavigationItem
+- (void)setRightBarButtonItems:(NSArray<UIBarButtonItem *> *)items animated:(BOOL)animated {
+    UIBarButtonItem *toggleItem = objc_getAssociatedObject(self, CRTNavigationToggleKey);
+    if (toggleItem && ![items containsObject:toggleItem]) {
+        items = [(items ?: @[]) arrayByAddingObject:toggleItem];
+    }
+    %orig(items, animated);
 }
 %end
 

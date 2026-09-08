@@ -230,3 +230,10 @@ PhoenixVideoAdSkip 1.1.1 正在修正“商城”Tab 实际路由到福利页导
 - 点击事件改为 UIButton 自身持有的 `UIAction`：直接切换偏好、更新图标并刷新方向，不再依赖 Telegram Swift 控制器的方法注入。
 - 独立公开仓库提交 `0f184cd`；仅 roothide 的 Actions run `34241347061` 成功，未创建 Release。
 - roothide 测试包：`C:\Users\liqiang\Downloads\com.swiftss.telegramrotationtoggle_1.0.4_iphoneos-arm64e.deb`；点击切换和解锁旋转仍需实机确认。
+
+## TelegramRotationToggle 1.0.5
+
+- 1.0.4 实机仍能显示图标但收不到点击，确认 window 悬浮层虽然可见，却位于 Telegram 顶部导航交互层之下，触摸被导航层截获。
+- 依据 Telegram 官方源码的 `updateRightNavigationButtons` 逻辑，改为真正追加到 `navigationItem.rightBarButtonItems`；同时 Hook 该数组更新，在 Telegram 重写按钮时自动补回控制项。
+- 独立公开仓库提交 `1f9516b`；仅 roothide 的 Actions run `34242486924` 成功，未创建 Release。
+- roothide 测试包：`C:\Users\liqiang\Downloads\com.swiftss.telegramrotationtoggle_1.0.5_iphoneos-arm64e.deb`；需实机确认导航按钮点击及旋转切换。

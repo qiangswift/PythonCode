@@ -26,5 +26,9 @@ Version 1.0.4 binds the toggle through UIButton's own UIAction. The visible
 fallback button therefore no longer depends on injecting an Objective-C action
 selector into the late-loaded Swift chat-controller class.
 
+Version 1.0.5 installs the control as an actual rightBarButtonItem instead of a
+window overlay. Telegram rewrites that array during chat-state updates, so the
+UINavigationItem setter keeps the toggle appended after Telegram's own items.
+
 Target environment: iOS 17 and Dopamine-compatible injection. The package is
 scoped only to the two listed bundle identifiers and never injects SpringBoard.

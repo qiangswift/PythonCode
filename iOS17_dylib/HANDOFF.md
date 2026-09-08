@@ -244,3 +244,10 @@ PhoenixVideoAdSkip 1.1.1 正在修正“商城”Tab 实际路由到福利页导
 - 删除 customView、宽高约束及悬浮 UIButton，改用标准图片型 `UIBarButtonItem` 与强持有 target/action；将 200×200 素材归一化为 22×22，并调整数组顺序使其位于头像左侧。
 - 首次公开构建 run `34243646647` 因 SDK 头文件不声明 UIAction initializer 而失败，未交付；改为兼容的 target/action 后，提交 `f535bcf`、仅 roothide run `34243972871` 成功，未创建 Release。
 - roothide 测试包：`C:\Users\liqiang\Downloads\com.swiftss.telegramrotationtoggle_1.0.6_iphoneos-arm64e.deb`；需实机确认外框、图标和点击切换。
+
+## TelegramRotationToggle 1.0.7
+
+- 1.0.6 实机确认按钮与头像仍被 Telegram 合并在同一圆框，点击锁按钮崩溃。代码确认自定义导航渲染器传给 target 的 sender 不是 `UIBarButtonItem`，而 handler 强类型调用其属性导致崩溃。
+- 完全撤销 `rightBarButtonItems` 注入，按钮改为 Telegram 导航栏内部的独立 40×40 圆形 UIButton，位于头像左侧；action 明确接收 UIButton，不再影响头像布局或发生 sender 类型错配。
+- 独立公开仓库提交 `c0df478`；仅 roothide 的 Actions run `34244982637` 成功，未创建 Release。
+- roothide 测试包：`C:\Users\liqiang\Downloads\com.swiftss.telegramrotationtoggle_1.0.7_iphoneos-arm64e.deb`；需实机确认独立圆框、点击切换和旋转行为。

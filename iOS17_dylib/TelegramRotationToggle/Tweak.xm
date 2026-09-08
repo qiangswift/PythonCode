@@ -1,5 +1,6 @@
 #import <UIKit/UIKit.h>
 #import <Foundation/Foundation.h>
+#import <QuartzCore/QuartzCore.h>
 #import <objc/message.h>
 #import <objc/runtime.h>
 #import <dlfcn.h>
@@ -7,8 +8,7 @@
 #import <substrate.h>
 
 static NSString *const CRTLockedKey = @"com.swiftss.telegramrotationtoggle.locked";
-static const void *CRTBarButtonKey = &CRTBarButtonKey;
-static const void *CRTNavigationToggleKey = &CRTNavigationToggleKey;
+static const void *CRTButtonKey = &CRTButtonKey;
 static IMP CRTOriginalDelegateMask = NULL;
 static Class CRTHookedDelegateClass = Nil;
 static BOOL CRTChatHooksInstalled = NO;
@@ -16,7 +16,7 @@ static void (*CRTOriginalChatViewDidAppear)(id, SEL, BOOL) = NULL;
 static void (*CRTOriginalChatViewDidLayoutSubviews)(id, SEL) = NULL;
 
 @interface CRTRotationToggleTarget : NSObject
-- (void)toggle:(UIBarButtonItem *)sender;
+- (void)toggle:(UIButton *)sender;
 @end
 
 static CRTRotationToggleTarget *CRTActionTarget = nil;
@@ -111,45 +111,67 @@ static void CRTRefreshOrientation(void) {
     });
 }
 
-static void CRTUpdateBarButton(UIBarButtonItem *barButton) {
+static void CRTUpdateButton(UIButton *button) {
     BOOL locked = CRTIsLocked();
     UIImage *icon = CRTIcon(locked);
-    if (icon) barButton.image = icon;
-    barButton.accessibilityLabel = locked ? @"启用随重力旋转" : @"锁定竖屏";
-    barButton.accessibilityValue = locked ? @"当前已锁定" : @"当前可旋转";
+    if (icon) [button setImage:icon forState:UIControlStateNormal];
+    button.accessibilityLabel = locked ? @"启用随重力旋转" : @"锁定竖屏";
+    button.accessibilityValue = locked ? @"当前已锁定" : @"当前可旋转";
 }
 
 @implementation CRTRotationToggleTarget
-- (void)toggle:(UIBarButtonItem *)sender {
+- (void)toggle:(UIButton *)sender {
     BOOL locked = !CRTIsLocked();
     [NSUserDefaults.standardUserDefaults setBool:locked forKey:CRTLockedKey];
-    CRTUpdateBarButton(sender);
+    CRTUpdateButton(sender);
     CRTRefreshOrientation();
 }
 @end
 
+static UIView *CRTNavigationBarView(UIViewController *controller) {
+    SEL navigationBarSelector = NSSelectorFromString(@"navigationBar");
+    if ([controller respondsToSelector:navigationBarSelector]) {
+        id candidate = ((id (*)(id, SEL))objc_msgSend)(controller, navigationBarSelector);
+        if ([candidate isKindOfClass:UIView.class]) return candidate;
+    }
+    return controller.navigationController.navigationBar;
+}
+
 static void CRTInstallButton(UIViewController *controller) {
     if (!controller.isViewLoaded) return;
-    UIBarButtonItem *barButton = objc_getAssociatedObject(controller, CRTBarButtonKey);
-    if (!barButton) {
+    UIView *navigationBar = CRTNavigationBarView(controller);
+    if (!navigationBar) return;
+
+    UIButton *button = objc_getAssociatedObject(controller, CRTButtonKey);
+    if (button && button.superview != navigationBar) {
+        [button removeFromSuperview];
+        button = nil;
+    }
+    if (!button) {
         if (!CRTActionTarget) CRTActionTarget = [CRTRotationToggleTarget new];
-        barButton = [[UIBarButtonItem alloc] initWithImage:CRTIcon(CRTIsLocked())
-            style:UIBarButtonItemStylePlain target:CRTActionTarget
-            action:@selector(toggle:)];
-        barButton.accessibilityIdentifier = @"com.swiftss.telegramrotationtoggle.button";
-        objc_setAssociatedObject(controller, CRTBarButtonKey, barButton,
+        button = [UIButton buttonWithType:UIButtonTypeSystem];
+        button.translatesAutoresizingMaskIntoConstraints = NO;
+        button.tintColor = UIColor.labelColor;
+        button.backgroundColor = [UIColor colorWithWhite:0.15 alpha:0.92];
+        button.layer.cornerRadius = 20.0;
+        button.clipsToBounds = YES;
+        button.accessibilityIdentifier = @"com.swiftss.telegramrotationtoggle.button";
+        [button addTarget:CRTActionTarget action:@selector(toggle:)
+            forControlEvents:UIControlEventTouchUpInside];
+        [navigationBar addSubview:button];
+        [NSLayoutConstraint activateConstraints:@[
+            [button.widthAnchor constraintEqualToConstant:40.0],
+            [button.heightAnchor constraintEqualToConstant:40.0],
+            [button.centerYAnchor constraintEqualToAnchor:navigationBar.centerYAnchor],
+            [button.trailingAnchor constraintEqualToAnchor:navigationBar.trailingAnchor
+                constant:-66.0]
+        ]];
+        objc_setAssociatedObject(controller, CRTButtonKey, button,
             OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     }
-
-    UINavigationItem *navigationItem = controller.navigationItem;
-    objc_setAssociatedObject(navigationItem, CRTNavigationToggleKey, barButton,
-        OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-    NSArray<UIBarButtonItem *> *currentItems = navigationItem.rightBarButtonItems ?: @[];
-    if (![currentItems containsObject:barButton]) {
-        [navigationItem setRightBarButtonItems:[@[barButton]
-            arrayByAddingObjectsFromArray:currentItems] animated:NO];
-    }
-    CRTUpdateBarButton(barButton);
+    button.hidden = NO;
+    [navigationBar bringSubviewToFront:button];
+    CRTUpdateButton(button);
 }
 
 static void CRTChatViewDidAppear(id self, SEL selector, BOOL animated) {
@@ -207,6 +229,14 @@ static void CRTImageAdded(const struct mach_header *header, intptr_t slide) {
     }
 }
 
+- (void)viewWillDisappear:(BOOL)animated {
+    %orig;
+    if (CRTIsChatController(self)) {
+        UIButton *button = objc_getAssociatedObject(self, CRTButtonKey);
+        button.hidden = YES;
+    }
+}
+
 - (UIInterfaceOrientationMask)supportedInterfaceOrientations {
     if (CRTIsLocked()) return UIInterfaceOrientationMaskPortrait;
     return %orig;
@@ -215,16 +245,6 @@ static void CRTImageAdded(const struct mach_header *header, intptr_t slide) {
 - (BOOL)shouldAutorotate {
     if (CRTIsLocked()) return NO;
     return %orig;
-}
-%end
-
-%hook UINavigationItem
-- (void)setRightBarButtonItems:(NSArray<UIBarButtonItem *> *)items animated:(BOOL)animated {
-    UIBarButtonItem *toggleItem = objc_getAssociatedObject(self, CRTNavigationToggleKey);
-    if (toggleItem && ![items containsObject:toggleItem]) {
-        items = [@[toggleItem] arrayByAddingObjectsFromArray:(items ?: @[])];
-    }
-    %orig(items, animated);
 }
 %end
 

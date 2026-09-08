@@ -35,5 +35,11 @@ bar reserved space for but did not render or route touches to. It now uses a
 standard image UIBarButtonItem with a retained target/action and prepends it so
 the item appears to the left of the avatar without stretching the avatar container.
 
+Version 1.0.7 removes the toggle from rightBarButtonItems entirely. Telegram's
+custom renderer passed a non-UIBarButtonItem sender to the target and grouped the
+item with the avatar. The control is now an independent circular UIButton inside
+Telegram's navigation-bar view, with a UIButton-specific action and no effect on
+the avatar item's layout.
+
 Target environment: iOS 17 and Dopamine-compatible injection. The package is
 scoped only to the two listed bundle identifiers and never injects SpringBoard.

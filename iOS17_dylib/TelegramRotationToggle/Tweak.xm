@@ -64,10 +64,10 @@ static void CRTRefreshOrientation(void) {
         for (UIScene *candidate in UIApplication.sharedApplication.connectedScenes) {
             if (![candidate isKindOfClass:UIWindowScene.class]) continue;
             UIWindowScene *scene = (UIWindowScene *)candidate;
-            for (UIWindow *window in scene.windows) {
-                [window.rootViewController setNeedsUpdateOfSupportedInterfaceOrientations];
-            }
             if (@available(iOS 16.0, *)) {
+                for (UIWindow *window in scene.windows) {
+                    [window.rootViewController setNeedsUpdateOfSupportedInterfaceOrientations];
+                }
                 Class preferencesClass = NSClassFromString(@"UIWindowSceneGeometryPreferencesIOS");
                 SEL initSelector = NSSelectorFromString(@"initWithInterfaceOrientations:");
                 SEL requestSelector = NSSelectorFromString(@"requestGeometryUpdateWithPreferences:errorHandler:");
@@ -140,7 +140,7 @@ static void CRTInstallButton(UIViewController *controller) {
 %hook _TtC10TelegramUI18ChatControllerImpl
 - (void)viewDidAppear:(BOOL)animated {
     %orig;
-    CRTInstallButton(self);
+    CRTInstallButton((UIViewController *)self);
 }
 
 - (void)viewDidLayoutSubviews {

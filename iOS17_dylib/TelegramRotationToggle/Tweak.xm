@@ -121,8 +121,15 @@ static void CRTInstallButton(UIViewController *controller) {
         button.tintColor = UIColor.labelColor;
         button.imageView.contentMode = UIViewContentModeScaleAspectFit;
         button.accessibilityIdentifier = @"com.swiftss.telegramrotationtoggle.button";
-        [button addTarget:controller action:@selector(crt_toggleRotationLock)
-            forControlEvents:UIControlEventTouchUpInside];
+        __weak UIButton *weakButton = button;
+        UIAction *toggleAction = [UIAction actionWithHandler:^(__kindof UIAction *action) {
+            BOOL locked = !CRTIsLocked();
+            [NSUserDefaults.standardUserDefaults setBool:locked forKey:CRTLockedKey];
+            UIButton *strongButton = weakButton;
+            if (strongButton) CRTUpdateButton(strongButton);
+            CRTRefreshOrientation();
+        }];
+        [button addAction:toggleAction forControlEvents:UIControlEventTouchUpInside];
         [window addSubview:button];
         [NSLayoutConstraint activateConstraints:@[
             [button.widthAnchor constraintEqualToConstant:40.0],
@@ -138,14 +145,6 @@ static void CRTInstallButton(UIViewController *controller) {
     button.hidden = NO;
     [window bringSubviewToFront:button];
     CRTUpdateButton(button);
-}
-
-static void CRTToggleRotationLock(id controller, SEL selector) {
-    BOOL locked = !CRTIsLocked();
-    [NSUserDefaults.standardUserDefaults setBool:locked forKey:CRTLockedKey];
-    UIButton *button = objc_getAssociatedObject(controller, CRTButtonKey);
-    if (button) CRTUpdateButton(button);
-    CRTRefreshOrientation();
 }
 
 static void CRTChatViewDidAppear(id self, SEL selector, BOOL animated) {
@@ -176,8 +175,6 @@ static void CRTHookChatControllerIfAvailable(void) {
     Class chatClass = NSClassFromString(@"_TtC10TelegramUI18ChatControllerImpl");
     if (!chatClass) return;
 
-    class_addMethod(chatClass, @selector(crt_toggleRotationLock),
-        (IMP)CRTToggleRotationLock, "v@:");
     MSHookMessageEx(chatClass, @selector(viewDidAppear:),
         (IMP)CRTChatViewDidAppear, (IMP *)&CRTOriginalChatViewDidAppear);
     MSHookMessageEx(chatClass, @selector(viewDidLayoutSubviews),

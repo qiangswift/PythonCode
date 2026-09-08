@@ -22,5 +22,9 @@ lifecycle that Telegram calls through `super`. This provides a path independent
 of direct Swift-class hooking, and uses SF Symbols if packaged icons cannot be
 resolved in a roothide path.
 
+Version 1.0.4 binds the toggle through UIButton's own UIAction. The visible
+fallback button therefore no longer depends on injecting an Objective-C action
+selector into the late-loaded Swift chat-controller class.
+
 Target environment: iOS 17 and Dopamine-compatible injection. The package is
 scoped only to the two listed bundle identifiers and never injects SpringBoard.

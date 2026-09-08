@@ -223,3 +223,10 @@ PhoenixVideoAdSkip 1.1.1 正在修正“商城”Tab 实际路由到福利页导
 - 图片加载增加 SF Symbols 兜底，避免 roothide 路径解析失败时出现透明按钮。
 - 独立公开仓库提交 `a191965`；仅 roothide 的 Actions run `34240409273` 成功，未创建 Release。
 - roothide 测试包：`C:\Users\liqiang\Downloads\com.swiftss.telegramrotationtoggle_1.0.3_iphoneos-arm64e.deb`；仍需实机确认图标显示和切换。
+
+## TelegramRotationToggle 1.0.4
+
+- 1.0.3 实机确认锁图标已显示，但点击无效。原因是兜底路径能创建按钮，而按钮 action 仍指向仅在 Swift 类动态 Hook 成功时才注入的 selector。
+- 点击事件改为 UIButton 自身持有的 `UIAction`：直接切换偏好、更新图标并刷新方向，不再依赖 Telegram Swift 控制器的方法注入。
+- 独立公开仓库提交 `0f184cd`；仅 roothide 的 Actions run `34241347061` 成功，未创建 Release。
+- roothide 测试包：`C:\Users\liqiang\Downloads\com.swiftss.telegramrotationtoggle_1.0.4_iphoneos-arm64e.deb`；点击切换和解锁旋转仍需实机确认。

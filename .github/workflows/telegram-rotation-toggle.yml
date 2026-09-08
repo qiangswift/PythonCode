@@ -1,0 +1,32 @@
+name: Build Telegram Rotation Toggle
+
+permissions:
+  contents: read
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'iOS17_dylib/TelegramRotationToggle/**'
+      - '.github/workflows/telegram-rotation-toggle.yml'
+
+jobs:
+  build-roothide:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install dependencies
+        run: brew install ldid make xz
+      - name: Install Theos
+        run: |
+          git clone --recursive https://github.com/roothide/theos.git "$HOME/theos"
+          curl -fsSL https://github.com/theos/sdks/archive/master.tar.gz | tar -xz --strip-components=1 -C "$HOME/theos/sdks"
+      - name: Build roothide
+        working-directory: iOS17_dylib/TelegramRotationToggle
+        run: |
+          export THEOS="$HOME/theos"
+          make clean package FINALPACKAGE=1 THEOS_PACKAGE_SCHEME=roothide ARCHS=arm64
+      - uses: actions/upload-artifact@v4
+        with:
+          name: TelegramRotationToggle-roothide
+          path: iOS17_dylib/TelegramRotationToggle/packages/*.deb

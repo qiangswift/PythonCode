@@ -197,3 +197,11 @@ PhoenixVideoAdSkip 1.1.1 正在修正“商城”Tab 实际路由到福利页导
 - 独立旧仓库提交：`ecd3aa4`，但 `swiftss` Actions run `33071235798` 因账户 billing 限制未启动任何构建步骤。
 - 源码快照与新工作流已提交至私有仓库 `qiangswift/PythonCode`，提交：`f1c8e20b`；Actions run `33071383122` 的 rootfull、rootless、roothide 均成功。
 - rootless 测试包：`C:\Users\liqiang\Downloads\com.swiftss.qdreaderautocheckin_1.2.7_iphoneos-arm64.deb`。
+
+## TelegramRotationToggle 1.0.0
+
+- 针对 Telegram 12.9.3（`ph.telegra.Telegraph`）和 Swiftgram 12.9.2（`app.swiftgram.ios`）静态确认聊天页类 `_TtC10TelegramUI18ChatControllerImpl`。
+- 在每个对话页右上角头像左侧增加锁定/解锁按钮；状态在两个 App 各自沙盒中独立保存。默认解锁，锁定后通过 app orientation mask 与 iOS 16+ scene geometry 立即切回并保持竖屏。
+- 新独立公开仓库：`https://github.com/qiangswift/TelegramRotationToggle`，初始提交 `6c3c7d0`。未上传砸壳 IPA，也未创建 Release。
+- 按用户要求仅构建 roothide。公开仓库 Actions run `34236909225` 成功。
+- roothide 测试包：`C:\Users\liqiang\Downloads\com.swiftss.telegramrotationtoggle_1.0.0_iphoneos-arm64e.deb`。

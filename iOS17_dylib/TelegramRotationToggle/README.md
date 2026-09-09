@@ -51,5 +51,10 @@ Version 1.0.9 removes the visible circular button background while preserving th
 viewDidAppear of controllers outside the active chat hierarchy, because Telegram
 does not consistently forward viewWillDisappear when returning to its home page.
 
+Version 1.0.10 calculates the final button frame from the visible chat window
+before presentation, waits briefly for the page transition to settle, and fades
+the icon in. Layout callbacks only refresh the frame and never restart the
+presentation, eliminating the small flash at the end of the chat-entry animation.
+
 Target environment: iOS 17 and Dopamine-compatible injection. The package is
 scoped only to the two listed bundle identifiers and never injects SpringBoard.

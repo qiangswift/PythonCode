@@ -1,6 +1,6 @@
 Package: com.swiftss.telegramrotationtoggle
 Name: Telegram/Swiftgram 旋转锁
-Version: 1.0.9
+Version: 1.0.10
 Architecture: iphoneos-arm
 Description: Adds a per-app portrait rotation toggle to Telegram and Swiftgram chat headers.
 Maintainer: swiftss

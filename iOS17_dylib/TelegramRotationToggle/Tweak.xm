@@ -34,6 +34,25 @@ static void (*CRTOriginalChatViewDidLayoutSubviews)(id, SEL) = NULL;
 
 static CRTRotationToggleTarget *CRTActionTarget = nil;
 static CRTPassthroughWindow *CRTOverlayWindow = nil;
+static NSUInteger CRTOverlayPresentationGeneration = 0;
+
+static void CRTHideOverlay(void) {
+    CRTOverlayPresentationGeneration += 1;
+    CRTOverlayWindow.hidden = YES;
+    CRTOverlayWindow.alpha = 0.0;
+}
+
+static void CRTPositionButton(UIViewController *controller) {
+    UIButton *button = CRTOverlayWindow.touchButton;
+    UIWindow *sourceWindow = controller.view.window;
+    UIWindowScene *scene = sourceWindow.windowScene;
+    if (!button || !sourceWindow || !scene) return;
+
+    CGRect bounds = scene.coordinateSpace.bounds;
+    UIEdgeInsets insets = sourceWindow.safeAreaInsets;
+    button.frame = CGRectMake(CGRectGetWidth(bounds) - insets.right - 106.0,
+        insets.top + 2.0, 40.0, 40.0);
+}
 
 static BOOL CRTIsLocked(void) {
     id storedValue = [NSUserDefaults.standardUserDefaults objectForKey:CRTLockedKey];
@@ -167,29 +186,34 @@ static void CRTInstallButton(UIViewController *controller) {
 
         if (!CRTActionTarget) CRTActionTarget = [CRTRotationToggleTarget new];
         UIButton *button = [UIButton buttonWithType:UIButtonTypeSystem];
-        button.translatesAutoresizingMaskIntoConstraints = NO;
         button.tintColor = UIColor.labelColor;
         button.backgroundColor = UIColor.clearColor;
+        button.autoresizingMask = UIViewAutoresizingFlexibleLeftMargin |
+            UIViewAutoresizingFlexibleBottomMargin;
         button.accessibilityIdentifier = @"com.swiftss.telegramrotationtoggle.button";
         [button addTarget:CRTActionTarget action:@selector(toggle:)
             forControlEvents:UIControlEventTouchUpInside];
         [overlayController.view addSubview:button];
-        [NSLayoutConstraint activateConstraints:@[
-            [button.widthAnchor constraintEqualToConstant:40.0],
-            [button.heightAnchor constraintEqualToConstant:40.0],
-            [button.topAnchor constraintEqualToAnchor:
-                overlayController.view.safeAreaLayoutGuide.topAnchor constant:2.0],
-            [button.trailingAnchor constraintEqualToAnchor:
-                overlayController.view.safeAreaLayoutGuide.trailingAnchor
-                constant:-66.0]
-        ]];
         CRTOverlayWindow.touchButton = button;
     }
 
     UIButton *button = CRTOverlayWindow.touchButton;
+    CRTPositionButton(controller);
     button.hidden = NO;
     CRTUpdateButton(button);
+    NSUInteger generation = ++CRTOverlayPresentationGeneration;
+    CRTOverlayWindow.alpha = 0.0;
     CRTOverlayWindow.hidden = NO;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 80 * NSEC_PER_MSEC),
+        dispatch_get_main_queue(), ^{
+            if (generation != CRTOverlayPresentationGeneration ||
+                CRTOverlayWindow.hidden) return;
+            [UIView animateWithDuration:0.12 delay:0.0
+                options:UIViewAnimationOptionBeginFromCurrentState |
+                    UIViewAnimationOptionCurveEaseOut
+                animations:^{ CRTOverlayWindow.alpha = 1.0; }
+                completion:nil];
+        });
 }
 
 static void CRTChatViewDidAppear(id self, SEL selector, BOOL animated) {
@@ -203,7 +227,7 @@ static void CRTChatViewDidLayoutSubviews(id self, SEL selector) {
     if (CRTOriginalChatViewDidLayoutSubviews) {
         CRTOriginalChatViewDidLayoutSubviews(self, selector);
     }
-    CRTInstallButton((UIViewController *)self);
+    CRTPositionButton((UIViewController *)self);
 }
 
 static void CRTHookChatControllerIfAvailable(void) {
@@ -237,7 +261,7 @@ static void CRTImageAdded(const struct mach_header *header, intptr_t slide) {
     %orig;
     BOOL isOverlayController = [objc_getAssociatedObject(self, CRTOverlayControllerKey) boolValue];
     if (!isOverlayController && !CRTControllerBelongsToChat(self)) {
-        CRTOverlayWindow.hidden = YES;
+        CRTHideOverlay();
     }
 }
 
@@ -248,7 +272,7 @@ static void CRTImageAdded(const struct mach_header *header, intptr_t slide) {
     } else {
         BOOL isOverlayController = [objc_getAssociatedObject(self, CRTOverlayControllerKey) boolValue];
         if (!isOverlayController && !CRTControllerBelongsToChat(self)) {
-            CRTOverlayWindow.hidden = YES;
+            CRTHideOverlay();
         }
     }
 }
@@ -256,14 +280,14 @@ static void CRTImageAdded(const struct mach_header *header, intptr_t slide) {
 - (void)viewDidLayoutSubviews {
     %orig;
     if (CRTIsChatController(self)) {
-        CRTInstallButton(self);
+        CRTPositionButton(self);
     }
 }
 
 - (void)viewWillDisappear:(BOOL)animated {
     %orig;
     if (CRTIsChatController(self)) {
-        CRTOverlayWindow.hidden = YES;
+        CRTHideOverlay();
     }
 }
 

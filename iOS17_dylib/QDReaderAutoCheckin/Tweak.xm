@@ -320,6 +320,13 @@ static NSURL *QDRCreateURL(NSString *value, NSURL *baseURL) {
     return CFBridgingRelease(url);
 }
 
+static BOOL QDRLooksLikeSplashSkip(NSString *candidate) {
+    NSString *lower = candidate.lowercaseString ?: @"";
+    return [lower containsString:@"\u8df3\u8fc7"] ||
+           [lower containsString:@"skip"] ||
+           [lower containsString:@"\u5173\u95ed\u5e7f\u544a"];
+}
+
 static BOOL QDRTapSplashSkipInView(UIView *view) {
     if (!view || view.hidden || view.alpha < 0.01) return NO;
     if ([view isKindOfClass:UIControl.class]) {
@@ -328,10 +335,20 @@ static BOOL QDRTapSplashSkipInView(UIView *view) {
         if ([control isKindOfClass:UIButton.class]) text = [(UIButton *)control titleForState:UIControlStateNormal] ?: @"";
         NSString *label = control.accessibilityLabel ?: @"";
         NSString *value = control.accessibilityValue ?: @"";
-        NSString *joined = [NSString stringWithFormat:@"%@ %@ %@", text, label, value].lowercaseString;
-        if ([joined containsString:@"跳过"] || [joined containsString:@"skip"]) {
+        NSString *identifier = control.accessibilityIdentifier ?: @"";
+        NSString *joined = [NSString stringWithFormat:@"%@ %@ %@ %@", text, label, value, identifier];
+        if (QDRLooksLikeSplashSkip(joined)) {
             [control sendActionsForControlEvents:UIControlEventTouchUpInside];
             return YES;
+        }
+    }
+    if ([view isKindOfClass:UILabel.class] && QDRLooksLikeSplashSkip(((UILabel *)view).text)) {
+        UIView *ancestor = view.superview;
+        for (NSUInteger depth = 0; ancestor && depth < 5; depth++, ancestor = ancestor.superview) {
+            if ([ancestor isKindOfClass:UIControl.class]) {
+                [(UIControl *)ancestor sendActionsForControlEvents:UIControlEventTouchUpInside];
+                return YES;
+            }
         }
     }
     for (UIView *child in view.subviews.reverseObjectEnumerator) if (QDRTapSplashSkipInView(child)) return YES;
@@ -348,7 +365,7 @@ static void QDRScheduleSplashSkip(NSUInteger attempt) {
             }
             if (tapped) break;
         }
-        if (!tapped && attempt < 25) QDRScheduleSplashSkip(attempt + 1);
+        if (!tapped && attempt < 100) QDRScheduleSplashSkip(attempt + 1);
     });
 }
 
@@ -1325,8 +1342,15 @@ static void QDRInstallShelfCheckinControls(QDRShelfNavView *navigationView) {
 %ctor {
     NSString *bundle = NSBundle.mainBundle.bundleIdentifier;
     if ([bundle isEqualToString:QDRTargetBundle] || [bundle isEqualToString:QDREnterpriseBundle]) {
-        QDRLog(@"loaded version=1.5.10 bundle=%@", bundle);
+        QDRLog(@"loaded version=1.5.11 bundle=%@", bundle);
         %init;
+        QDRScheduleSplashSkip(0);
+        [NSNotificationCenter.defaultCenter addObserverForName:UIApplicationDidBecomeActiveNotification
+                                                        object:nil
+                                                         queue:NSOperationQueue.mainQueue
+                                                    usingBlock:^(__unused NSNotification *note) {
+            QDRScheduleSplashSkip(0);
+        }];
         QDRInstallTeenagerLifecycleHook();
         _dyld_register_func_for_add_image(QDRImageAdded);
         Class shelfVC = objc_getClass("_TtC16QDReaderAppStore25QDBookShelfViewController");

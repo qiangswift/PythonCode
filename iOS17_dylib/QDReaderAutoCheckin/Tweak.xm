@@ -215,9 +215,6 @@ static BOOL QDRTextIndicatesAuthFailure(NSString *text) {
     return NO;
 }
 
-@interface QDRShelfViewController : UIViewController
-@end
-
 static NSString *QDRLogPath(void) {
     NSString *documents = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES).firstObject;
     return [documents stringByAppendingPathComponent:@"QDReaderAutoCheckin.log"];

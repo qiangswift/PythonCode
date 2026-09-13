@@ -5,6 +5,7 @@
 #import <objc/message.h>
 #import <dlfcn.h>
 #import <mach-o/dyld.h>
+#import <substrate.h>
 #import <math.h>
 #import <string.h>
 
@@ -227,6 +228,53 @@ static BOOL QDRIsTeenagerAlertController(UIViewController *controller) {
         return QDRIsTeenagerAlertController(navigation.visibleViewController ?: navigation.topViewController);
     }
     return NO;
+}
+
+static void (*QDRTeenagerOriginalViewWillAppear)(UIViewController *, SEL, BOOL);
+static void (*QDRTeenagerOriginalViewDidAppear)(UIViewController *, SEL, BOOL);
+static BOOL QDRTeenagerLifecycleHookInstalled = NO;
+
+static void QDRDismissTeenagerController(UIViewController *controller) {
+    if (!controller) return;
+    controller.view.hidden = YES;
+    controller.presentationController.containerView.hidden = YES;
+    dispatch_async(dispatch_get_main_queue(), ^{
+        [controller dismissViewControllerAnimated:NO completion:nil];
+        if (controller.parentViewController) {
+            [controller willMoveToParentViewController:nil];
+            [controller.view removeFromSuperview];
+            [controller removeFromParentViewController];
+        }
+    });
+}
+
+static void QDRTeenagerViewWillAppear(UIViewController *controller, SEL selector, BOOL animated) {
+    if (QDRTeenagerOriginalViewWillAppear) QDRTeenagerOriginalViewWillAppear(controller, selector, animated);
+    QDRLog(@"suppressed teenager-mode controller in viewWillAppear");
+    QDRDismissTeenagerController(controller);
+}
+
+static void QDRTeenagerViewDidAppear(UIViewController *controller, SEL selector, BOOL animated) {
+    if (QDRTeenagerOriginalViewDidAppear) QDRTeenagerOriginalViewDidAppear(controller, selector, animated);
+    QDRDismissTeenagerController(controller);
+}
+
+static void QDRInstallTeenagerLifecycleHook(void) {
+    if (QDRTeenagerLifecycleHookInstalled) return;
+    Class cls = objc_getClass("_TtC19QDBusinessComponent29QDTeenagerAlertViewController");
+    if (!cls) return;
+    QDRTeenagerLifecycleHookInstalled = YES;
+    MSHookMessageEx(cls, @selector(viewWillAppear:), (IMP)QDRTeenagerViewWillAppear,
+                    (IMP *)&QDRTeenagerOriginalViewWillAppear);
+    MSHookMessageEx(cls, @selector(viewDidAppear:), (IMP)QDRTeenagerViewDidAppear,
+                    (IMP *)&QDRTeenagerOriginalViewDidAppear);
+    QDRLog(@"teenager-mode lifecycle hook installed");
+}
+
+static void QDRImageAdded(const struct mach_header *header, intptr_t slide) {
+    (void)header;
+    (void)slide;
+    dispatch_async(dispatch_get_main_queue(), ^{ QDRInstallTeenagerLifecycleHook(); });
 }
 
 static NSString *QDRLogPath(void) {
@@ -1277,8 +1325,10 @@ static void QDRInstallShelfCheckinControls(QDRShelfNavView *navigationView) {
 %ctor {
     NSString *bundle = NSBundle.mainBundle.bundleIdentifier;
     if ([bundle isEqualToString:QDRTargetBundle] || [bundle isEqualToString:QDREnterpriseBundle]) {
-        QDRLog(@"loaded version=1.5.9 bundle=%@", bundle);
+        QDRLog(@"loaded version=1.5.10 bundle=%@", bundle);
         %init;
+        QDRInstallTeenagerLifecycleHook();
+        _dyld_register_func_for_add_image(QDRImageAdded);
         Class shelfVC = objc_getClass("_TtC16QDReaderAppStore25QDBookShelfViewController");
         Class shelfHeader = objc_getClass("_TtC16QDReaderAppStore25QDBookShelfLeadReadHeader");
         Class shelfNav = objc_getClass("_TtC16QDReaderAppStore18QDBookShelfNavView");

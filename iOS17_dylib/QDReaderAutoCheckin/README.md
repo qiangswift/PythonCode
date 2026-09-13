@@ -23,6 +23,10 @@ markers, rebuild credentials from the app Cookie jar, and retry once. If those
 credentials are also rejected, they stay cleared so a later native login request
 can be captured without manual preference-file cleanup.
 
+Entering Welfare Center after a verified run is silently ignored for the rest
+of that day. QDReader's dedicated teenager-mode promotional alert is suppressed
+without affecting ordinary app alerts.
+
 Native commercial splash ads, including cached first-party book promotions,
 are rejected through QDReader's own no-ad launch predicates. Third-party splash
 fallbacks keep their normal lifecycle and are closed through their skip path.

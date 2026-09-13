@@ -216,6 +216,19 @@ static BOOL QDRTextIndicatesAuthFailure(NSString *text) {
     return NO;
 }
 
+static BOOL QDRIsTeenagerAlertController(UIViewController *controller) {
+    if (!controller) return NO;
+    NSString *className = NSStringFromClass(controller.class);
+    if ([className isEqualToString:@"QDBusinessComponent.QDTeenagerAlertViewController"] ||
+        [className isEqualToString:@"_TtC19QDBusinessComponent29QDTeenagerAlertViewController"] ||
+        [className hasSuffix:@".QDTeenagerAlertViewController"]) return YES;
+    if ([controller isKindOfClass:UINavigationController.class]) {
+        UINavigationController *navigation = (UINavigationController *)controller;
+        return QDRIsTeenagerAlertController(navigation.visibleViewController ?: navigation.topViewController);
+    }
+    return NO;
+}
+
 static NSString *QDRLogPath(void) {
     NSString *documents = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES).firstObject;
     return [documents stringByAppendingPathComponent:@"QDReaderAutoCheckin.log"];
@@ -438,7 +451,6 @@ static void QDRScheduleSplashSkip(NSUInteger attempt) {
         BOOL manualShelfRun = [source isEqualToString:@"bookshelf-button"];
         if (!manualShelfRun && [[[self store] stringForKey:QDRLastCompletedKey] isEqualToString:[self todayKey]]) {
             QDRLog(@"skip: all tasks already completed today");
-            [self presentMessage:@"今日任务已经执行完成，无需重复运行" title:@"起点自动签到"];
             return;
         }
         if (self.running) { QDRLog(@"skip: task is already running"); return; }
@@ -1166,6 +1178,19 @@ static void QDRInstallShelfCheckinControls(QDRShelfNavView *navigationView) {
 }
 %end
 
+%hook UIViewController
+- (void)presentViewController:(UIViewController *)viewControllerToPresent
+                     animated:(BOOL)animated
+                   completion:(void (^)(void))completion {
+    if (QDRIsTeenagerAlertController(viewControllerToPresent)) {
+        QDRLog(@"suppressed teenager-mode alert presenter=%@", NSStringFromClass(self.class));
+        if (completion) dispatch_async(dispatch_get_main_queue(), completion);
+        return;
+    }
+    %orig;
+}
+%end
+
 %group QDRShelfPromotionHooks
 
 %hook QDRShelfLeadReadHeader
@@ -1252,7 +1277,7 @@ static void QDRInstallShelfCheckinControls(QDRShelfNavView *navigationView) {
 %ctor {
     NSString *bundle = NSBundle.mainBundle.bundleIdentifier;
     if ([bundle isEqualToString:QDRTargetBundle] || [bundle isEqualToString:QDREnterpriseBundle]) {
-        QDRLog(@"loaded version=1.5.8 bundle=%@", bundle);
+        QDRLog(@"loaded version=1.5.9 bundle=%@", bundle);
         %init;
         Class shelfVC = objc_getClass("_TtC16QDReaderAppStore25QDBookShelfViewController");
         Class shelfHeader = objc_getClass("_TtC16QDReaderAppStore25QDBookShelfLeadReadHeader");

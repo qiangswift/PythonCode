@@ -14,6 +14,7 @@ static NSString *const QDRPrefsSuite = @"com.swiftss.qdreaderautocheckin.runtime
 // Do not trust the legacy completion key: versions through 1.2.7 wrote it
 // when JavaScript merely called $done(), even if no task request was made.
 static NSString *const QDRLastCompletedKey = @"verifiedLastCompletedDateV2";
+static NSString *const QDRAuthRecoveryMigrationKey = @"authRecoveryMigrationV1";
 static NSString *const QDRChapterCardCountKey = @"chapterCardCount";
 static NSString *const QDRChapterCardCountDidChange = @"com.swiftss.qdreaderautocheckin.chapter-card-count-changed";
 static const void *QDRShelfCollapseInFlightKey = &QDRShelfCollapseInFlightKey;
@@ -427,6 +428,13 @@ static void QDRScheduleSplashSkip(NSUInteger attempt) {
 
 - (void)startForWelfareEntry:(NSString *)source {
     dispatch_async(self.queue, ^{
+        NSUserDefaults *store = [self store];
+        if (![store boolForKey:QDRAuthRecoveryMigrationKey]) {
+            [self invalidateStoredAuthentication];
+            [store setBool:YES forKey:QDRAuthRecoveryMigrationKey];
+            [store synchronize];
+            QDRLog(@"authentication recovery migration completed");
+        }
         BOOL manualShelfRun = [source isEqualToString:@"bookshelf-button"];
         if (!manualShelfRun && [[[self store] stringForKey:QDRLastCompletedKey] isEqualToString:[self todayKey]]) {
             QDRLog(@"skip: all tasks already completed today");

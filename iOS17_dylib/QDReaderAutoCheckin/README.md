@@ -16,8 +16,12 @@ from QDReader's in-memory `QDMineViewModel.userInfoModel` and
 The rendered Mine account cell remains a display-only fallback.
 
 The tweak shows a start alert and a final alert. Diagnostic output is stored in
-the app sandbox at `Documents/QDReaderAutoCheckin.log`. After a completed run,
-the current date is recorded and later entries on the same day are skipped.
+the app sandbox at `Documents/QDReaderAutoCheckin.log`. Only a run with completed
+successful task requests is recorded for the current date. Authentication
+failures automatically clear stale Cookie data and old/current completion
+markers, rebuild credentials from the app Cookie jar, and retry once. If those
+credentials are also rejected, they stay cleared so a later native login request
+can be captured without manual preference-file cleanup.
 
 Native commercial splash ads, including cached first-party book promotions,
 are rejected through QDReader's own no-ad launch predicates. Third-party splash
@@ -36,7 +40,7 @@ and JavaScriptCore runtime bridge.
 ## Compatibility
 
 - Tested target: QDReader App Store 5.9.474, iOS 17
-- Package variants: rootful, rootless and roothide
+- Package variant: roothide
 - The tweak never injects SpringBoard
 
 This is an unofficial personal automation project. Account and service risks

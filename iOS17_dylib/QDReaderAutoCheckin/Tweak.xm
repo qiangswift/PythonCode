@@ -194,6 +194,30 @@ static void QDRCaptureChapterCardFromMineCell(QDRMineAccountCell *cell) {
     QDRLog(@"chapter card captured from mine account cell count=%ld", (long)bestCount);
 }
 
+static NSString *const QDRLegacyCompletedKey = @"lastCompletedDate";
+
+static BOOL QDRTextIndicatesAuthFailure(NSString *text) {
+    if (![text isKindOfClass:NSString.class] || text.length == 0) return NO;
+    NSString *lower = text.lowercaseString;
+    for (NSString *marker in @[
+        @"\u767b\u5f55\u72b6\u6001\u5df2\u5931\u6548",
+        @"\u767b\u5f55\u5df2\u5931\u6548",
+        @"\u8bf7\u91cd\u65b0\u767b\u5f55",
+        @"cookie\u5df2\u5931\u6548",
+        @"cookie\u5931\u6548",
+        @"\u672a\u767b\u5f55",
+        @"login expired",
+        @"not logged in",
+        @"unauthorized"
+    ]) {
+        if ([lower containsString:marker.lowercaseString]) return YES;
+    }
+    return NO;
+}
+
+@interface QDRShelfViewController : UIViewController
+@end
+
 static NSString *QDRLogPath(void) {
     NSString *documents = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES).firstObject;
     return [documents stringByAppendingPathComponent:@"QDReaderAutoCheckin.log"];
@@ -279,6 +303,8 @@ static void QDRScheduleSplashSkip(NSUInteger attempt) {
 @property(nonatomic) NSUInteger runFetchStarted;
 @property(nonatomic) NSUInteger runFetchFinished;
 @property(nonatomic) NSUInteger runHTTPSuccessCount;
+@property(nonatomic) BOOL authFailureDetected;
+@property(nonatomic) BOOL authRefreshRetried;
 + (instancetype)shared;
 - (void)captureRequest:(NSURLRequest *)request;
 - (void)startForWelfareEntry;
@@ -286,6 +312,7 @@ static void QDRScheduleSplashSkip(NSUInteger attempt) {
 - (void)startFromShelfButton:(UIButton *)sender;
 - (void)presentMessage:(NSString *)message title:(NSString *)title;
 - (void)presentMessage:(NSString *)message title:(NSString *)title completion:(dispatch_block_t)completion;
+- (void)invalidateStoredAuthentication;
 @end
 
 @implementation QDRAutoRunner
@@ -410,10 +437,20 @@ static void QDRScheduleSplashSkip(NSUInteger attempt) {
             return;
         }
         if (self.running) { QDRLog(@"skip: task is already running"); return; }
+        self.authRefreshRetried = NO;
         [self presentMessage:@"已检测到福利中心，开始执行全部任务。离开本页不会中断。" title:@"任务已开始"];
         [self seedCookieFromStorageIfNeeded];
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)), self.queue, ^{ [self beginRunIfIdle]; });
     });
+}
+
+- (void)invalidateStoredAuthentication {
+    NSUserDefaults *store = [self store];
+    [store removeObjectForKey:@"QDREADER_COOKIE"];
+    [store removeObjectForKey:QDRLastCompletedKey];
+    [store removeObjectForKey:QDRLegacyCompletedKey];
+    [store synchronize];
+    QDRLog(@"stored authentication and daily completion invalidated");
 }
 
 - (void)seedCookieFromStorageIfNeeded {
@@ -474,14 +511,31 @@ static void QDRScheduleSplashSkip(NSUInteger attempt) {
     self.runFetchStarted = 0;
     self.runFetchFinished = 0;
     self.runHTTPSuccessCount = 0;
+    self.authFailureDetected = NO;
     QDRLog(@"script run started; script=%@", [self scriptPath] ?: @"<missing>");
     self.pendingNotice = nil;
     [self evaluateWithRequest:nil completion:^{
         self.running = NO;
+        BOOL authFailure = self.authFailureDetected || QDRTextIndicatesAuthFailure(self.pendingNotice);
         BOOL failureText = [self.pendingNotice containsString:@"失败"] || [self.pendingNotice containsString:@"异常"] ||
                            [self.pendingNotice containsString:@"错误"] || [self.pendingNotice containsString:@"未完成"];
         BOOL requestsComplete = self.runFetchStarted > 0 && self.runFetchFinished == self.runFetchStarted;
-        BOOL verified = !self.runFailed && !failureText && requestsComplete && self.runHTTPSuccessCount > 0;
+        BOOL verified = !authFailure && !self.runFailed && !failureText && requestsComplete && self.runHTTPSuccessCount > 0;
+        if (authFailure) {
+            [self invalidateStoredAuthentication];
+            if (!self.authRefreshRetried) {
+                self.authRefreshRetried = YES;
+                [self seedCookieFromStorageIfNeeded];
+                NSString *refreshedCookie = [[self store] stringForKey:@"QDREADER_COOKIE"];
+                if (refreshedCookie.length > 0) {
+                    self.pendingNotice = nil;
+                    QDRLog(@"authentication failure detected; Cookie rebuilt, retrying once");
+                    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)),
+                                   self.queue, ^{ [self beginRunIfIdle]; });
+                    return;
+                }
+            }
+        }
         if (verified) {
             [[self store] setObject:[self todayKey] forKey:QDRLastCompletedKey];
             [[self store] synchronize];
@@ -495,6 +549,7 @@ static void QDRScheduleSplashSkip(NSUInteger attempt) {
         }
         NSString *message = nil;
         if (verified) message = self.pendingNotice.length ? self.pendingNotice : @"签到任务已完成并通过请求校验。";
+        else if (authFailure) message = @"检测到登录状态失效，已自动清除旧 Cookie 和错误的今日完成记录。请重新登录起点账号；登录后再次进入福利中心即可自动获取新 Cookie。";
         else if (self.runFailed) message = self.pendingNotice.length ? self.pendingNotice : @"签到脚本未成功执行，请导出日志排查。";
         else if (self.runFetchStarted == 0) message = @"脚本已结束，但未发起任何签到请求，本次不计为成功。";
         else if (!requestsComplete) message = @"脚本在网络请求完成前提前结束，本次不计为成功。";
@@ -633,6 +688,10 @@ static void QDRScheduleSplashSkip(NSUInteger attempt) {
                 }
                 result[@"body"] = bodyData ? [[NSString alloc] initWithData:bodyData encoding:NSUTF8StringEncoding] ?: @"" : @"";
                 result[@"error"] = networkError.localizedDescription ?: @"";
+                if (!requestObject && QDRTextIndicatesAuthFailure(result[@"body"])) {
+                    weakSelf.authFailureDetected = YES;
+                    weakSelf.runFailed = YES;
+                }
                 if (networkError || statusCode < 200 || statusCode >= 300) QDRLog(@"request failed status=%ld error=%@ response=%@", (long)statusCode, networkError.localizedDescription ?: @"<none>", QDRRedactedExcerpt(bodyData));
                 NSData *resultData = [NSJSONSerialization dataWithJSONObject:result options:0 error:nil];
                 NSString *resultJSON = [[NSString alloc] initWithData:resultData encoding:NSUTF8StringEncoding] ?: @"{}";
@@ -653,6 +712,10 @@ static void QDRScheduleSplashSkip(NSUInteger attempt) {
             if (text.length) [parts addObject:text];
         }
         weakSelf.pendingNotice = [parts componentsJoinedByString:@"\n"];
+        if (QDRTextIndicatesAuthFailure(weakSelf.pendingNotice)) {
+            weakSelf.authFailureDetected = YES;
+            weakSelf.runFailed = YES;
+        }
     };
     context[@"__nativeDone"] = ^{
         if (!finished) { finished = YES; weakSelf.activeContext = nil; if (completion) completion(); }
@@ -1184,7 +1247,7 @@ static void QDRInstallShelfCheckinControls(QDRShelfNavView *navigationView) {
 %ctor {
     NSString *bundle = NSBundle.mainBundle.bundleIdentifier;
     if ([bundle isEqualToString:QDRTargetBundle] || [bundle isEqualToString:QDREnterpriseBundle]) {
-        QDRLog(@"loaded version=1.5.7 bundle=%@", bundle);
+        QDRLog(@"loaded version=1.5.8 bundle=%@", bundle);
         %init;
         Class shelfVC = objc_getClass("_TtC16QDReaderAppStore25QDBookShelfViewController");
         Class shelfHeader = objc_getClass("_TtC16QDReaderAppStore25QDBookShelfLeadReadHeader");

@@ -85,6 +85,17 @@ static NSString *const SVPNCellularDownloadKey = @"TrafficCellularDownload";
 static NSString *const SVPNCellularUploadKey = @"TrafficCellularUpload";
 static NSString *const SVPNWifiDownloadKey = @"TrafficWifiDownload";
 static NSString *const SVPNWifiUploadKey = @"TrafficWifiUpload";
+static NSString *const SVPNInterfaceTotalsKey = @"TrafficInterfaceTotals";
+
+static NSString *svpnTrafficTypeForInterface(NSString *name) {
+    if ([name hasPrefix:@"pdp_ip"]) return @"cellular";
+    if ([name hasPrefix:@"en"]) return @"wifi";
+    if ([name hasPrefix:@"utun"] || [name hasPrefix:@"ipsec"]) return @"vpn";
+    if ([name hasPrefix:@"awdl"] || [name hasPrefix:@"llw"]) return @"peer";
+    if ([name hasPrefix:@"bridge"] || [name hasPrefix:@"ap"]) return @"bridge";
+    if ([name hasPrefix:@"lo"]) return @"loopback";
+    return @"other";
+}
 
 static BOOL svpnIsStatusBarNavigationView(STUIStatusBarStringView *view, CGRect proposedFrame) {
     NSString *text = view.text ?: @"";
@@ -139,17 +150,11 @@ static void svpnSampleTrafficUsage(void) {
         }
 
         NSString *name = [NSString stringWithUTF8String:interface->ifa_name];
-        BOOL isWifi = [name isEqualToString:@"en0"];
-        BOOL isCellular = [name hasPrefix:@"pdp_ip"];
-        if (!isWifi && !isCellular) {
-            continue;
-        }
-
         const struct if_data *data = (const struct if_data *)interface->ifa_data;
         currentBaselines[name] = @{
             @"download": @((unsigned long long)data->ifi_ibytes),
             @"upload": @((unsigned long long)data->ifi_obytes),
-            @"type": isWifi ? @"wifi" : @"cellular",
+            @"type": svpnTrafficTypeForInterface(name),
         };
     }
     freeifaddrs(interfaces);
@@ -161,24 +166,32 @@ static void svpnSampleTrafficUsage(void) {
         __block unsigned long long cellularUpload = [[defaults objectForKey:SVPNCellularUploadKey] unsignedLongLongValue];
         __block unsigned long long wifiDownload = [[defaults objectForKey:SVPNWifiDownloadKey] unsignedLongLongValue];
         __block unsigned long long wifiUpload = [[defaults objectForKey:SVPNWifiUploadKey] unsignedLongLongValue];
+        NSMutableDictionary *interfaceTotals = [[defaults dictionaryForKey:SVPNInterfaceTotalsKey] mutableCopy] ?: [NSMutableDictionary dictionary];
 
         [currentBaselines enumerateKeysAndObjectsUsingBlock:^(NSString *name, NSDictionary *current, BOOL *stop) {
             NSDictionary *previous = previousBaselines[name];
-            if (!previous) {
-                return;
-            }
-
             unsigned long long currentDownload = [current[@"download"] unsignedLongLongValue];
             unsigned long long currentUpload = [current[@"upload"] unsignedLongLongValue];
-            unsigned long long previousDownload = [previous[@"download"] unsignedLongLongValue];
-            unsigned long long previousUpload = [previous[@"upload"] unsignedLongLongValue];
-            unsigned long long downloadDelta = currentDownload >= previousDownload ? currentDownload - previousDownload : currentDownload;
-            unsigned long long uploadDelta = currentUpload >= previousUpload ? currentUpload - previousUpload : currentUpload;
+            unsigned long long downloadDelta = 0;
+            unsigned long long uploadDelta = 0;
+            if (previous) {
+                unsigned long long previousDownload = [previous[@"download"] unsignedLongLongValue];
+                unsigned long long previousUpload = [previous[@"upload"] unsignedLongLongValue];
+                downloadDelta = currentDownload >= previousDownload ? currentDownload - previousDownload : currentDownload;
+                uploadDelta = currentUpload >= previousUpload ? currentUpload - previousUpload : currentUpload;
+            }
+
+            NSDictionary *saved = interfaceTotals[name];
+            interfaceTotals[name] = @{
+                @"download": @([saved[@"download"] unsignedLongLongValue] + downloadDelta),
+                @"upload": @([saved[@"upload"] unsignedLongLongValue] + uploadDelta),
+                @"type": current[@"type"] ?: @"other",
+            };
 
             if ([current[@"type"] isEqualToString:@"wifi"]) {
                 wifiDownload += downloadDelta;
                 wifiUpload += uploadDelta;
-            } else {
+            } else if ([current[@"type"] isEqualToString:@"cellular"]) {
                 cellularDownload += downloadDelta;
                 cellularUpload += uploadDelta;
             }
@@ -188,6 +201,19 @@ static void svpnSampleTrafficUsage(void) {
         [defaults setObject:@(cellularUpload) forKey:SVPNCellularUploadKey];
         [defaults setObject:@(wifiDownload) forKey:SVPNWifiDownloadKey];
         [defaults setObject:@(wifiUpload) forKey:SVPNWifiUploadKey];
+        [defaults setObject:interfaceTotals forKey:SVPNInterfaceTotalsKey];
+    }
+
+    if (![defaults dictionaryForKey:SVPNInterfaceTotalsKey]) {
+        NSMutableDictionary *initialTotals = [NSMutableDictionary dictionary];
+        [currentBaselines enumerateKeysAndObjectsUsingBlock:^(NSString *name, NSDictionary *current, BOOL *stop) {
+            initialTotals[name] = @{
+                @"download": @0,
+                @"upload": @0,
+                @"type": current[@"type"] ?: @"other",
+            };
+        }];
+        [defaults setObject:initialTotals forKey:SVPNInterfaceTotalsKey];
     }
 
     [defaults setObject:currentBaselines forKey:SVPNTrafficBaselinesKey];

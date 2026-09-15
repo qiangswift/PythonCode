@@ -46,7 +46,7 @@
 			<key>label</key>
 			<string>流量统计</string>
 			<key>footerText</key>
-			<string>后台每小时统计一次，进入本页面时立即刷新；按 1024 进制永久累加。</string>
+			<string>后台每小时统计一次，进入本页面时立即刷新；按 1024 进制永久累加。首页仅汇总蜂窝网络和 Wi-Fi，本页面另列全部网络接口。</string>
 		</dict>
 		<dict>
 			<key>cell</key>
@@ -209,7 +209,7 @@
 			<key>label</key>
 			<string></string>
 			<key>footerText</key>
-			<string>Version 2.2.0</string>
+			<string>Version 2.3.0</string>
 		</dict>
 	</array>
 	<key>title</key>

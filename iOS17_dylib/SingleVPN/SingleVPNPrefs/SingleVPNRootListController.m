@@ -93,6 +93,23 @@ void SingleVPNBatchKillAll(NSArray<NSString *> *processNames, BOOL softly) {
 
 @implementation SingleVPNRootListController
 
+- (NSString *)formattedTrafficBytes:(unsigned long long)bytes {
+    static NSArray<NSString *> *units = nil;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        units = @[ @"B", @"KB", @"MB", @"GB", @"TB", @"PB" ];
+    });
+    double value = (double)bytes;
+    NSUInteger unitIndex = 0;
+    while (value >= 1024.0 && unitIndex < units.count - 1) {
+        value /= 1024.0;
+        unitIndex++;
+    }
+    return unitIndex == 0
+        ? [NSString stringWithFormat:@"%llu %@", bytes, units[unitIndex]]
+        : [NSString stringWithFormat:@"%.2f %@", value, units[unitIndex]];
+}
+
 - (void)viewWillAppear:(BOOL)animated {
     [super viewWillAppear:animated];
 
@@ -112,23 +129,28 @@ void SingleVPNBatchKillAll(NSArray<NSString *> *processNames, BOOL softly) {
 - (NSString *)trafficValueForKey:(NSString *)key {
     NSUserDefaults *defaults = [[NSUserDefaults alloc] initWithSuiteName:@"com.82flex.singlevpnprefs"];
     unsigned long long bytes = [[defaults objectForKey:key] unsignedLongLongValue];
-    static NSArray<NSString *> *units = nil;
-    static dispatch_once_t onceToken;
-    dispatch_once(&onceToken, ^{
-        units = @[ @"B", @"KB", @"MB", @"GB", @"TB", @"PB" ];
-    });
+    return [self formattedTrafficBytes:bytes];
+}
 
-    double value = (double)bytes;
-    NSUInteger unitIndex = 0;
-    while (value >= 1024.0 && unitIndex < units.count - 1) {
-        value /= 1024.0;
-        unitIndex++;
-    }
+- (NSString *)interfaceTrafficValue:(PSSpecifier *)specifier {
+    NSString *name = [specifier propertyForKey:@"trafficInterfaceName"];
+    NSDictionary *totals = [[[NSUserDefaults alloc] initWithSuiteName:@"com.82flex.singlevpnprefs"] dictionaryForKey:@"TrafficInterfaceTotals"];
+    NSDictionary *entry = totals[name];
+    return [NSString stringWithFormat:@"↓ %@   ↑ %@",
+            [self formattedTrafficBytes:[entry[@"download"] unsignedLongLongValue]],
+            [self formattedTrafficBytes:[entry[@"upload"] unsignedLongLongValue]]];
+}
 
-    if (unitIndex == 0) {
-        return [NSString stringWithFormat:@"%llu %@", bytes, units[unitIndex]];
-    }
-    return [NSString stringWithFormat:@"%.2f %@", value, units[unitIndex]];
+- (NSString *)displayNameForInterfaceType:(NSString *)type {
+    return @{
+        @"wifi": @"Wi-Fi/有线",
+        @"cellular": @"蜂窝网络",
+        @"vpn": @"VPN 隧道",
+        @"peer": @"点对点网络",
+        @"bridge": @"网络桥接",
+        @"loopback": @"本机回环",
+        @"other": @"其他",
+    }[type] ?: @"其他";
 }
 
 - (NSString *)cellularDownloadValue:(PSSpecifier *)specifier {
@@ -164,6 +186,26 @@ void SingleVPNBatchKillAll(NSArray<NSString *> *processNames, BOOL softly) {
                 }
             }
             [mSpecs addObject:spec];
+            if ([[spec propertyForKey:@"get"] isEqualToString:@"wifiUploadValue:"]) {
+                PSSpecifier *group = [PSSpecifier preferenceSpecifierNamed:@"所有网络接口"
+                    target:self set:NULL get:NULL detail:nil cell:PSGroupCell edit:nil];
+                [group setProperty:@"分别累计各接口流量；VPN/点对点/桥接接口不重复并入首页 Wi-Fi 与 5G 汇总。"
+                         forKey:@"footerText"];
+                [mSpecs addObject:group];
+
+                NSDictionary *totals = [[[NSUserDefaults alloc] initWithSuiteName:@"com.82flex.singlevpnprefs"] dictionaryForKey:@"TrafficInterfaceTotals"];
+                NSArray<NSString *> *names = [totals.allKeys sortedArrayUsingSelector:@selector(localizedStandardCompare:)];
+                for (NSString *name in names) {
+                    NSDictionary *entry = totals[name];
+                    NSString *label = [NSString stringWithFormat:@"%@ · %@", name,
+                                       [self displayNameForInterfaceType:entry[@"type"]]];
+                    PSSpecifier *interfaceSpecifier = [PSSpecifier preferenceSpecifierNamed:label
+                        target:self set:NULL get:@selector(interfaceTrafficValue:) detail:nil
+                        cell:PSStaticTextCell edit:nil];
+                    [interfaceSpecifier setProperty:name forKey:@"trafficInterfaceName"];
+                    [mSpecs addObject:interfaceSpecifier];
+                }
+            }
         }
         _specifiers = mSpecs;
     }

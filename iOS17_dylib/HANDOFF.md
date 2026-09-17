@@ -2,6 +2,9 @@
 
 ## FleamarketClaimLog 1.0.0
 
+- 1.2.0 on-device log (2026-09-17 17:18 GMT+08:00) has four `MtopWVPlugin.send` claim calls, all with `FAIL_BIZ_IDL_COIN_TASK_RMB_CHECK_ERROR`, and zero `claim outgoing` lines. Among visible bridge payload fields, `asac` and `sceneId` are constant; `deliveryId` has two values. The final wire request remains uncaptured; do not infer which local signal causes server rejection.
+- 1.3.0 adds a one-time, metadata-only runtime selector/type-encoding inventory for likely MTOP transport classes upon the confirmed claim call. Use the resulting device log to select a safe narrow hook; no request values are changed.
+
 - 1.1.1 on-device log (2026-09-17 16:56 GMT+08:00) captured six claim callback failures: `FAIL_BIZ_IDL_COIN_TASK_RMB_CHECK_ERROR`; HTTP response status 200 and `MtopErrorMsg` equals the same code. The user-facing alert follows the first callback by about 11 ms. This proves server-side business validation failure, not its precise cause. Bridge request `data` keys are `deliveryId`, `asac`, `sceneId`; lower MTOP layers may append device/signature information.
 - 1.2.0 adds a narrow, opt-in `NSURLSession` outgoing URL/method/header/body logger for the claim API, retaining the bridge and callback baseline. If no `claim outgoing` line appears, do not infer that wire headers/body were captured. Request and Cookie values in the local log are sensitive and must not be published.
 

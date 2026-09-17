@@ -238,6 +238,43 @@ static void FMDescribeCallback(id callback) {
     }
 }
 
+static void FMDescribeMtopTransport(void) {
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        NSArray<NSString *> *names = @[ @"MtopExtRequest", @"MtopExtRequestHelper", @"MtopRequest",
+                                       @"TMtopRequest", @"MtopApiRequest", @"MtopRequestContainer",
+                                       @"TBSDKMTOPServer", @"WXMtopRequest" ];
+        for (NSString *name in names) {
+            Class cls = NSClassFromString(name);
+            if (!cls) {
+                FMLog([NSString stringWithFormat:@"claim transport class=%@ unavailable", name]);
+                continue;
+            }
+            for (NSUInteger meta = 0; meta < 2; meta++) {
+                Class target = meta ? object_getClass(cls) : cls;
+                unsigned int count = 0;
+                Method *methods = class_copyMethodList(target, &count);
+                NSMutableArray *selected = [NSMutableArray array];
+                for (unsigned int index = 0; index < count && selected.count < 70; index++) {
+                    NSString *selector = NSStringFromSelector(method_getName(methods[index]));
+                    NSString *lower = selector.lowercaseString;
+                    if ([lower containsString:@"api"] || [lower containsString:@"request"] ||
+                        [lower containsString:@"send"] || [lower containsString:@"param"] ||
+                        [lower containsString:@"header"] || [lower containsString:@"sign"] ||
+                        [lower containsString:@"url"] || [lower containsString:@"body"] ||
+                        [lower containsString:@"server"] || [lower containsString:@"data"]) {
+                        const char *types = method_getTypeEncoding(methods[index]);
+                        [selected addObject:[NSString stringWithFormat:@"%@ (%s)", selector, types ?: "?"]];
+                    }
+                }
+                free(methods);
+                FMLog([NSString stringWithFormat:@"claim transport class=%@ kind=%@ superclass=%@ selectors=%@",
+                       name, meta ? @"class" : @"instance", NSStringFromClass(class_getSuperclass(target)), selected]);
+            }
+        }
+    });
+}
+
 typedef struct {
     void *isa;
     int flags;
@@ -458,6 +495,7 @@ static void FMDescribeMtopClasses(void) {
 %hook MtopWVPlugin
 - (void)send:(id)params withCallback:(id)callback withWebView:(id)webView withViewController:(id)viewController {
     if (FMIsOliverClaimCall(params)) {
+        FMDescribeMtopTransport();
         FMLog([NSString stringWithFormat:@"claim bridge send paramClass=%@ callbackClass=%@ webViewClass=%@",
                params ? NSStringFromClass([params class]) : @"nil",
                callback ? NSStringFromClass([callback class]) : @"nil",
@@ -589,7 +627,7 @@ static void FMDescribeMtopClasses(void) {
 
 %ctor {
     if (![NSBundle.mainBundle.bundleIdentifier isEqualToString:@"com.taobao.fleamarket"]) return;
-    FMLog(@"loaded version=1.2.0 stage=read-only Oliver claim bridge and URLSession request probe");
+    FMLog(@"loaded version=1.3.0 stage=read-only MTOP transport method discovery");
     %init;
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         FMDescribeMtopClasses();

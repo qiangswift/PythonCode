@@ -1,4 +1,6 @@
-# 闲鱼领取诊断 1.2.0
+# 闲鱼领取诊断 1.3.0
+
+1.3.0 adds a one-time method-signature inventory for a short list of MTOP transport classes when the confirmed claim bridge call occurs. This is metadata only: it logs class names and selected Objective-C selector/type encodings, never object values. The 1.2.0 device log showed no `claim outgoing` line, so `NSURLSession` did not reveal the final wire request. Use this inventory to choose a verified MTOP send hook in a later version; do not describe the bridge payload as the complete HTTP request.
 
 1.2.0 keeps the confirmed WindVane claim request and callback logs, and additionally records matching `NSURLSession` outgoing request URL, method, headers, and body (including an upload body) when the claim API appears in the URL or body. This is a best-effort network-layer probe, not proof that MTOP uses `NSURLSession`; if no `claim outgoing` line appears, the bridge request and callback remain the evidence, while the actual wire format is still unknown. No request, response, or device value is changed. Compare a failed and a later successful attempt made with the same plugin version and app version.
 

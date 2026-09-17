@@ -2,6 +2,9 @@
 #import <UIKit/UIKit.h>
 #import <objc/runtime.h>
 
+static NSTimeInterval FMClaimUntil = 0;
+static BOOL FMClaimActive(void) { return [NSDate date].timeIntervalSince1970 <= FMClaimUntil; }
+
 static NSString *FMLogPath(void) {
     NSString *documents = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES).firstObject;
     return [documents stringByAppendingPathComponent:@"FleamarketClaimLog.log"];
@@ -34,6 +37,30 @@ static NSString *FMSafeValue(id value) {
     if (![value isKindOfClass:NSString.class] && ![value isKindOfClass:NSNumber.class]) return nil;
     NSString *text = [value description];
     return text.length > 180 ? [[text substringToIndex:180] stringByAppendingString:@"…"] : text;
+}
+
+static NSDictionary *FMObjectFields(id object) {
+    if (!object || object == [NSNull null]) return @{};
+    NSMutableDictionary *fields = [NSMutableDictionary dictionary];
+    NSDictionary *dictionary = [object isKindOfClass:NSDictionary.class] ? object : nil;
+    for (NSString *key in @[ @"ret", @"code", @"errorCode", @"errorMsg", @"msg", @"message", @"success", @"resultCode" ]) {
+        id value = dictionary[key];
+        if (!dictionary) {
+            @try { value = [object valueForKey:key]; } @catch (NSException *exception) { value = nil; }
+        }
+        if ([value isKindOfClass:NSArray.class]) {
+            NSMutableArray *items = [NSMutableArray array];
+            for (id item in (NSArray *)value) {
+                NSString *safe = FMSafeValue(item);
+                if (safe && items.count < 4) [items addObject:safe];
+            }
+            if (items.count) fields[key] = items;
+        } else {
+            NSString *safe = FMSafeValue(value);
+            if (safe) fields[key] = safe;
+        }
+    }
+    return fields;
 }
 
 static NSDictionary *FMResponseFields(NSData *data) {
@@ -74,7 +101,7 @@ static void FMRecord(NSURL *url, NSData *data, NSURLResponse *response, NSError 
 }
 
 static void FMDescribeMtopClasses(void) {
-    for (NSString *name in @[ @"FMMtopRequestModel", @"FMMtopResponseModel", @"FMNetMtopRequest" ]) {
+    for (NSString *name in @[ @"FMMtopRequestModel", @"FMMtopResponseModel", @"FMNetMtopRequest", @"XSearchSwift.OliverBatchIssueRequest", @"OliverBatchIssueRequest" ]) {
         Class cls = NSClassFromString(name);
         if (!cls) { FMLog([NSString stringWithFormat:@"mtop runtime class=%@ unavailable", name]); continue; }
         unsigned int count = 0;
@@ -82,17 +109,33 @@ static void FMDescribeMtopClasses(void) {
         NSMutableArray *selectors = [NSMutableArray array];
         for (unsigned int index = 0; index < count; index++) {
             NSString *selector = NSStringFromSelector(method_getName(methods[index]));
-            NSString *lower = selector.lowercaseString;
-            if ([lower containsString:@"api"] || [lower containsString:@"response"] ||
-                [lower containsString:@"result"] || [lower containsString:@"error"] ||
-                [lower containsString:@"code"] || [lower containsString:@"ret"]) {
-                if (selectors.count < 40) [selectors addObject:selector];
-            }
+            if (selectors.count < 80) [selectors addObject:selector];
         }
         free(methods);
-        FMLog([NSString stringWithFormat:@"mtop runtime class=%@ selectors=%@", name, selectors]);
+        FMLog([NSString stringWithFormat:@"mtop runtime class=%@ superclass=%@ selectors=%@",
+               name, NSStringFromClass(class_getSuperclass(cls)), selectors]);
     }
 }
+
+%hook FMMtopRequestModel
+- (void)setApiName:(NSString *)apiName {
+    if ([apiName.lowercaseString containsString:@"idle.oliver.batch.issue"]) {
+        FMClaimUntil = [NSDate date].timeIntervalSince1970 + 90;
+        FMLog(@"claim request started channel=FMMtopRequestModel");
+    }
+    %orig;
+}
+%end
+
+%hook FMMtopResponseModel
+- (void)setReturnDO:(id)returnDO {
+    if (FMClaimActive()) {
+        FMLog([NSString stringWithFormat:@"mtop returnDO class=%@ fields=%@",
+               returnDO ? NSStringFromClass([returnDO class]) : @"nil", FMObjectFields(returnDO)]);
+    }
+    %orig;
+}
+%end
 
 %hook NSURLSession
 - (NSURLSessionDataTask *)dataTaskWithRequest:(NSURLRequest *)request
@@ -132,7 +175,7 @@ static void FMDescribeMtopClasses(void) {
 
 %ctor {
     if (![NSBundle.mainBundle.bundleIdentifier isEqualToString:@"com.taobao.fleamarket"]) return;
-    FMLog(@"loaded version=0.1.0 stage=read-only NSURLSession claim probe");
+    FMLog(@"loaded version=0.2.0 stage=read-only MTOP claim probe");
     %init;
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         FMDescribeMtopClasses();

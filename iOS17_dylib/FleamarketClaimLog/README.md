@@ -1,4 +1,6 @@
-# 闲鱼领取诊断 1.1.0
+# 闲鱼领取诊断 1.1.1
+
+1.1.1 accepts both plain `@` and class-qualified object encodings such as `@"NSString"`. The observed claim callback has signature `void (^)(NSString *, NSDictionary *)`; the first argument is logged as callback status, and the second as the result payload, before forwarding both unchanged. On-device response logging still needs verification.
 
 1.1.0 verifies the native Block callback signature before wrapping it. Supported `void` signatures with an object response (and optionally an object or BOOL second argument) log the returned error/response while forwarding the exact original arguments to the original Block. Unsupported signatures are left untouched and logged as skipped. This needs on-device validation; a successful build alone does not verify the callback path.
 

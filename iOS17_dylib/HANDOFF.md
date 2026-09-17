@@ -2,6 +2,8 @@
 
 ## FleamarketClaimLog 1.0.0
 
+- 1.1.0 on-device log (2026-09-17 16:51 GMT+08:00) shows the actual Block signature `v24@?0@"NSString"8@"NSDictionary"16` for all four claim attempts. Strict comparison to `@` incorrectly skipped these class-qualified object encodings. 1.1.1 matches object encoding by leading `@` and captures status plus response dictionary without changing original callback arguments. The actual on-device response remains pending.
+
 - 1.0.0 on-device log (2026-09-17 16:43 GMT+08:00) confirms four claim calls: `MtopWVPlugin.send` gets a dictionary request, `__NSMallocBlock__` callback, and `WVWKWebView`. Request payload and cookies logged. Failure alert follows at 16:43:12.090. Block callbacks do not expose useful Objective-C selectors, hence 1.0.0 lacks the server response.
 - 1.1.0 reads the Block ABI signature and conditionally wraps only supported void callbacks with object first argument, forwarding the original arguments and recording the response. On-device signature and actual callback firing still unverified; unsupported callbacks are untouched.
 

@@ -230,16 +230,20 @@ static const char *FMBlockSignature(id callback) {
     return *(const char **)descriptor;
 }
 
-static void FMRecordClaimCallback(id result) {
+static void FMRecordClaimCallback(id status, id result) {
     NSString *payload = nil;
     if ([NSJSONSerialization isValidJSONObject:result]) {
         NSData *encoded = [NSJSONSerialization dataWithJSONObject:result options:0 error:nil];
         payload = [[NSString alloc] initWithData:encoded encoding:NSUTF8StringEncoding];
     } else if ([result isKindOfClass:NSString.class]) payload = result;
     if (payload.length > 12000) payload = [[payload substringToIndex:12000] stringByAppendingString:@" [truncated]"];
-    FMLog([NSString stringWithFormat:@"claim bridge callback resultClass=%@ fields=%@ payload=%@",
-           result ? NSStringFromClass([result class]) : @"nil", FMResponseSummary(result),
-           payload ?: @"unavailable"]);
+    FMLog([NSString stringWithFormat:@"claim bridge callback status=%@ resultClass=%@ fields=%@ payload=%@",
+           FMSafeValue(status) ?: @"unavailable", result ? NSStringFromClass([result class]) : @"nil",
+           FMResponseSummary(result), payload ?: @"unavailable"]);
+}
+
+static BOOL FMIsObjectBlockArgument(NSMethodSignature *signature, NSUInteger index) {
+    return signature.numberOfArguments > index && [signature getArgumentTypeAtIndex:index][0] == '@';
 }
 
 static id FMTraceClaimCallback(id callback) {
@@ -247,26 +251,26 @@ static id FMTraceClaimCallback(id callback) {
     if (!types) { FMLog(@"claim callback wrap skipped: no Block signature"); return callback; }
     FMLog([NSString stringWithFormat:@"claim callback Block signature=%s", types]);
     NSMethodSignature *signature = [NSMethodSignature signatureWithObjCTypes:types];
-    if (!signature || signature.methodReturnType[0] != 'v' || signature.numberOfArguments < 2 ||
-        strcmp([signature getArgumentTypeAtIndex:1], "@") != 0) {
+    if (!signature || signature.methodReturnType[0] != 'v' ||
+        !FMIsObjectBlockArgument(signature, 1)) {
         FMLog(@"claim callback wrap skipped: unsupported return or first argument");
         return callback;
     }
     if (signature.numberOfArguments == 2) {
         return [^(id result) {
-            FMRecordClaimCallback(result);
+            FMRecordClaimCallback(nil, result);
             ((void (^)(id))callback)(result);
         } copy];
     }
-    if (signature.numberOfArguments == 3 && strcmp([signature getArgumentTypeAtIndex:2], "@") == 0) {
-        return [^(id result, id extra) {
-            FMRecordClaimCallback(result);
-            ((void (^)(id, id))callback)(result, extra);
+    if (signature.numberOfArguments == 3 && FMIsObjectBlockArgument(signature, 2)) {
+        return [^(id status, id result) {
+            FMRecordClaimCallback(status, result);
+            ((void (^)(id, id))callback)(status, result);
         } copy];
     }
     if (signature.numberOfArguments == 3 && strcmp([signature getArgumentTypeAtIndex:2], "B") == 0) {
         return [^(id result, BOOL success) {
-            FMRecordClaimCallback(result);
+            FMRecordClaimCallback(nil, result);
             ((void (^)(id, BOOL))callback)(result, success);
         } copy];
     }
@@ -542,7 +546,7 @@ static void FMDescribeMtopClasses(void) {
 
 %ctor {
     if (![NSBundle.mainBundle.bundleIdentifier isEqualToString:@"com.taobao.fleamarket"]) return;
-    FMLog(@"loaded version=1.1.0 stage=read-only Oliver claim callback response probe");
+    FMLog(@"loaded version=1.1.1 stage=read-only typed Oliver claim callback probe");
     %init;
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         FMDescribeMtopClasses();

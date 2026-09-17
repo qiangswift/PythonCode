@@ -19,12 +19,16 @@ static NSDictionary *FMObjectFields(id object);
     if (!body) return;
     NSString *kind = FMSafeValue(body[@"kind"]);
     NSString *api = FMSafeValue(body[@"api"]);
+    if ([kind isEqualToString:@"page"]) {
+        FMLog([NSString stringWithFormat:@"web page host=%@", api ?: @"unknown"]);
+        return;
+    }
     if (![kind isEqualToString:@"request"] && ![kind isEqualToString:@"response"]) return;
-    if (!api || ![api hasPrefix:@"mtop."]) return;
+    if (!api || !([api hasPrefix:@"mtop."] || [api hasPrefix:@"web:"])) return;
     if ([kind isEqualToString:@"request"]) {
-        FMLog([NSString stringWithFormat:@"web mtop request api=%@", api]);
+        FMLog([NSString stringWithFormat:@"web request api=%@", api]);
     } else {
-        FMLog([NSString stringWithFormat:@"web mtop response api=%@ status=%@ fields=%@",
+        FMLog([NSString stringWithFormat:@"web response api=%@ status=%@ fields=%@",
                api, FMSafeValue(body[@"status"]) ?: @"?", FMObjectFields(body[@"fields"]) ]);
     }
 }
@@ -40,7 +44,13 @@ static void FMLog(NSString *line) {
         NSString *path = FMLogPath();
         NSDictionary *attributes = [NSFileManager.defaultManager attributesOfItemAtPath:path error:nil];
         if ([attributes[NSFileSize] unsignedLongLongValue] >= 1024 * 1024) return;
-        NSString *entry = [NSString stringWithFormat:@"%@: %@\n", [NSDate date], line];
+        static NSDateFormatter *formatter;
+        if (!formatter) {
+            formatter = [NSDateFormatter new];
+            formatter.dateFormat = @"yyyy-MM-dd HH:mm:ss.SSS ZZZZ";
+            formatter.timeZone = NSTimeZone.localTimeZone;
+        }
+        NSString *entry = [NSString stringWithFormat:@"%@: %@\n", [formatter stringFromDate:NSDate.date], line];
         NSData *data = [entry dataUsingEncoding:NSUTF8StringEncoding];
         if (!attributes) [data writeToFile:path atomically:YES];
         else {
@@ -90,8 +100,11 @@ static NSDictionary *FMObjectFields(id object) {
 
 static NSString *FMWebScript(void) {
     return @"(function(){if(window.__fmClaimProbe)return;window.__fmClaimProbe=1;"
-    @"function api(u){var m=String(u||'').toLowerCase().match(/mtop\\.[a-z0-9_.]+/);return m?m[0]:null;}"
+    @"function api(u){try{var x=new URL(String(u||''),location.href);if(!/^https?:$/.test(x.protocol))return null;"
+    @"var m=(x.pathname+x.search).toLowerCase().match(/mtop\\.[a-z0-9_.]+/);if(m)return m[0];"
+    @"var p=x.pathname.split('/').filter(Boolean).slice(0,4).map(function(s){return /^[a-z0-9._-]{1,24}$/i.test(s)&&!/^\\d+$/.test(s)?s:':id'}).join('/');return 'web:'+x.hostname+'/'+p}catch(e){return null}}"
     @"function send(x){try{window.webkit.messageHandlers.fmClaimProbe.postMessage(x)}catch(e){}}"
+    @"send({kind:'page',api:location.hostname||'local'});"
     @"function fields(t){try{var o=JSON.parse(t);if(!o||typeof o!=='object')return {};"
     @"var r={};['ret','code','errorCode','msg','message','success'].forEach(function(k){"
     @"var v=o[k];if(typeof v==='string'||typeof v==='number'||typeof v==='boolean')r[k]=String(v).slice(0,180);"
@@ -242,9 +255,26 @@ static void FMDescribeMtopClasses(void) {
 }
 %end
 
+%hook UIApplication
+- (void)sendEvent:(UIEvent *)event {
+    static NSTimeInterval lastMarker = 0;
+    NSTimeInterval now = NSDate.date.timeIntervalSince1970;
+    if (event.type == UIEventTypeTouches && now - lastMarker >= 0.4) {
+        for (UITouch *touch in event.allTouches) {
+            if (touch.phase == UITouchPhaseEnded) {
+                lastMarker = now;
+                FMLog(@"touch ended");
+                break;
+            }
+        }
+    }
+    %orig;
+}
+%end
+
 %ctor {
     if (![NSBundle.mainBundle.bundleIdentifier isEqualToString:@"com.taobao.fleamarket"]) return;
-    FMLog(@"loaded version=0.3.0 stage=read-only native and WebView MTOP probe");
+    FMLog(@"loaded version=0.4.0 stage=read-only native and WebView request probe");
     %init;
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         FMDescribeMtopClasses();

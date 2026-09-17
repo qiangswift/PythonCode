@@ -4,6 +4,8 @@
 #import <objc/runtime.h>
 
 static NSTimeInterval FMClaimUntil = 0;
+static NSTimeInterval FMPageStartAt = 0;
+static NSTimeInterval FMLastTouchAt = 0;
 static BOOL FMClaimActive(void) { return [NSDate date].timeIntervalSince1970 <= FMClaimUntil; }
 static void FMLog(NSString *line);
 static NSString *FMSafeValue(id value);
@@ -111,11 +113,19 @@ static id FMProperty(id object, NSString *key) {
 
 static NSDictionary *FMResponseSummary(id object) {
     NSMutableDictionary *summary = [FMObjectFields(object) mutableCopy];
+    NSString *api = FMSafeValue(FMProperty(object, @"api"));
+    if ([api hasPrefix:@"mtop."] && [api rangeOfString:@"/"].location == NSNotFound) summary[@"api"] = api;
+    for (NSString *key in @[ @"subErrorCode", @"subErrorInfo", @"errorInfo", @"bizInfo", @"info" ]) {
+        NSString *safe = FMSafeValue(FMProperty(object, key));
+        if (safe) summary[key] = safe;
+    }
     for (NSString *key in @[ @"data", @"result", @"error", @"model" ]) {
         id nested = FMProperty(object, key);
         if (!nested || nested == NSNull.null) continue;
         NSDictionary *fields = FMObjectFields(nested);
         if (fields.count) summary[key] = fields;
+        NSDictionary *deeper = FMObjectFields(FMProperty(nested, @"data"));
+        if (deeper.count) summary[[key stringByAppendingString:@".data"]] = deeper;
         else if (![nested isKindOfClass:NSDictionary.class] && ![nested isKindOfClass:NSArray.class])
             summary[[key stringByAppendingString:@".class"]] = NSStringFromClass([nested class]);
     }
@@ -136,26 +146,43 @@ static NSString *FMSafeIdentifier(id value) {
 
 static void FMRecordScriptMessage(NSString *name, id body) {
     if (!FMClaimActive() || [name isEqualToString:@"fmClaimProbe"]) return;
-    static unsigned int count = 0;
-    if (++count > 150) return;
     NSDictionary *dictionary = [body isKindOfClass:NSDictionary.class] ? body : nil;
     if (!dictionary && [body isKindOfClass:NSString.class] && [body length] < 32768) {
         id parsed = [NSJSONSerialization JSONObjectWithData:[body dataUsingEncoding:NSUTF8StringEncoding]
                                                 options:0 error:nil];
         if ([parsed isKindOfClass:NSDictionary.class]) dictionary = parsed;
     }
-    NSMutableArray *keys = [NSMutableArray array];
-    for (id key in dictionary) {
+    NSString *callName = FMSafeIdentifier(dictionary[@"name"]) ?: @"unknown";
+    static NSMutableDictionary *seen;
+    if (!seen) seen = [NSMutableDictionary dictionary];
+    NSString *signature = [NSString stringWithFormat:@"%@/%@", FMSafeIdentifier(name) ?: @"other", callName];
+    NSUInteger previous = [seen[signature] unsignedIntegerValue];
+    seen[signature] = @(previous + 1);
+    NSTimeInterval now = NSDate.date.timeIntervalSince1970;
+    BOOL nearTap = now - FMLastTouchAt >= 0 && now - FMLastTouchAt < 0.45 && now - FMPageStartAt > 1.5;
+    if (previous >= 2 && !nearTap) return;
+    static unsigned int logged = 0;
+    if (++logged > 300) return;
+    id rawParams = dictionary[@"params"];
+    NSDictionary *params = [rawParams isKindOfClass:NSDictionary.class] ? rawParams : nil;
+    if (!params && [rawParams isKindOfClass:NSString.class] && [rawParams length] < 32768) {
+        id parsed = [NSJSONSerialization JSONObjectWithData:[rawParams dataUsingEncoding:NSUTF8StringEncoding]
+                                                options:0 error:nil];
+        if ([parsed isKindOfClass:NSDictionary.class]) params = parsed;
+    }
+    NSMutableArray *paramKeys = [NSMutableArray array];
+    for (id key in params) {
         NSString *safe = FMSafeIdentifier(key);
-        if (safe && keys.count < 20) [keys addObject:safe];
+        if (safe && paramKeys.count < 15) [paramKeys addObject:safe];
     }
     NSMutableDictionary *identifiers = [NSMutableDictionary dictionary];
     for (NSString *key in @[ @"api", @"apiName", @"class", @"className", @"method", @"action", @"service" ]) {
-        NSString *safe = FMSafeIdentifier(dictionary[key]);
+        NSString *safe = FMSafeIdentifier(params[key] ?: dictionary[key]);
         if (safe) identifiers[key] = safe;
     }
-    FMLog([NSString stringWithFormat:@"script message name=%@ bodyClass=%@ keys=%@ identifiers=%@",
-           FMSafeIdentifier(name) ?: @"other", NSStringFromClass([body class]), keys, identifiers]);
+    FMLog([NSString stringWithFormat:@"script call handler=%@ name=%@ nearTap=%d paramsClass=%@ paramKeys=%@ identifiers=%@",
+           FMSafeIdentifier(name) ?: @"other", callName, nearTap,
+           rawParams ? NSStringFromClass([rawParams class]) : @"nil", paramKeys, identifiers]);
 }
 
 static NSString *FMWebScript(void) {
@@ -260,7 +287,8 @@ static void FMDescribeMtopClasses(void) {
         FMLog(@"claim request started channel=FMMtopRequestModel");
     }
     if ([apiName.lowercaseString containsString:@"idle.treasure.hunt.map.init"]) {
-        FMClaimUntil = [NSDate date].timeIntervalSince1970 + 60;
+        FMPageStartAt = [NSDate date].timeIntervalSince1970;
+        FMClaimUntil = FMPageStartAt + 60;
         FMLog(@"coin page response window opened");
     }
     %orig;
@@ -357,6 +385,7 @@ static void FMDescribeMtopClasses(void) {
         for (UITouch *touch in event.allTouches) {
             if (touch.phase == UITouchPhaseEnded) {
                 lastMarker = now;
+                FMLastTouchAt = now;
                 FMLog(@"touch ended");
                 break;
             }
@@ -368,7 +397,7 @@ static void FMDescribeMtopClasses(void) {
 
 %ctor {
     if (![NSBundle.mainBundle.bundleIdentifier isEqualToString:@"com.taobao.fleamarket"]) return;
-    FMLog(@"loaded version=0.8.0 stage=read-only WebKit message probe");
+    FMLog(@"loaded version=0.9.0 stage=read-only bridge call and MTOP error probe");
     %init;
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         FMDescribeMtopClasses();

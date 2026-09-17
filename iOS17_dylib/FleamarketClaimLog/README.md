@@ -1,6 +1,6 @@
-# 闲鱼领取诊断 0.8.0
+# 闲鱼领取诊断 0.9.0
 
-只注入 `com.taobao.fleamarket`；只读记录请求和屏幕出现的两种领取失败文案时间，不更改请求、响应或设备环境。日志位于闲鱼沙盒 `Documents/FleamarketClaimLog.log`。0.8.0 根据 0.7.0 日志中“点击后 135 毫秒 WebView 出现失败文案，但没有 fetch/XHR 或 WindVane.call 领奖调用”的证据，增加 WebKit 向原生层发送脚本消息时的只读探针。只记录消息名、顶层字段名、经过字符过滤的 API/类/方法标识，不记录消息正文或请求参数；并列出 `FMMtopReturnDO` 可用方法，帮助判断响应模型数据是否可进一步精确提取。若仍无领奖消息，不能断定没有网络请求，只能说明这些挂点未覆盖它。替换 dylib 后须彻底关闭并重开闲鱼，再进入活动页。
+只注入 `com.taobao.fleamarket`；只读记录请求和屏幕出现的两种领取失败文案时间，不更改请求、响应或设备环境。日志位于闲鱼沙盒 `Documents/FleamarketClaimLog.log`。0.9.0 根据 0.8.0 日志确认的 WebKit 消息结构 `name/reqId/params`，改为记录经字符过滤的 `name` 与 `params` 内接口标识及字段名，并对重复埋点限流；不记录 `reqId`、请求正文或任意参数值。同时补读已确认存在的 `FMMtopReturnDO.api/subErrorCode/subErrorInfo/errorInfo/bizInfo/info` 和嵌套的白名单错误字段。响应模型事件仍需按 API 和时间关联，不能仅凭临近时间推断因果。替换 dylib 后须彻底关闭并重开闲鱼，再进入活动页。
 
 日志不包含 URL 查询参数、请求头、Cookie、Token、设备标识或原始响应正文；只提取服务端 `ret`、`code`、`msg` 等错误结果字段（字符串截断为 180 字符）。请仍在分享前核对日志。日志上限 1 MiB，超过后停止记录而非删除已有数据；卸载插件不自动删除日志。
 

@@ -195,6 +195,10 @@ static void FMDescribeMtopClasses(void) {
         FMClaimUntil = [NSDate date].timeIntervalSince1970 + 90;
         FMLog(@"claim request started channel=FMMtopRequestModel");
     }
+    if ([apiName.lowercaseString containsString:@"idle.treasure.hunt.map.init"]) {
+        FMClaimUntil = [NSDate date].timeIntervalSince1970 + 60;
+        FMLog(@"coin page response window opened");
+    }
     %orig;
 }
 %end
@@ -225,6 +229,13 @@ static void FMDescribeMtopClasses(void) {
     if (FMClaimActive()) {
         FMLog([NSString stringWithFormat:@"mtop returnDO class=%@ fields=%@",
                returnDO ? NSStringFromClass([returnDO class]) : @"nil", FMObjectFields(returnDO)]);
+    }
+    %orig;
+}
+- (void)setUserInfo:(id)userInfo {
+    if (FMClaimActive()) {
+        FMLog([NSString stringWithFormat:@"mtop userInfo class=%@ fields=%@",
+               userInfo ? NSStringFromClass([userInfo class]) : @"nil", FMObjectFields(userInfo)]);
     }
     %orig;
 }
@@ -285,7 +296,7 @@ static void FMDescribeMtopClasses(void) {
 
 %ctor {
     if (![NSBundle.mainBundle.bundleIdentifier isEqualToString:@"com.taobao.fleamarket"]) return;
-    FMLog(@"loaded version=0.5.0 stage=read-only WindVane bridge probe");
+    FMLog(@"loaded version=0.6.0 stage=read-only coin response probe");
     %init;
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         FMDescribeMtopClasses();

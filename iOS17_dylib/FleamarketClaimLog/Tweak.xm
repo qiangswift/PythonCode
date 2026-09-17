@@ -2,6 +2,7 @@
 #import <UIKit/UIKit.h>
 #import <WebKit/WebKit.h>
 #import <objc/runtime.h>
+#import <objc/message.h>
 #import <stdint.h>
 #import <string.h>
 
@@ -137,6 +138,63 @@ static id FMProperty(id object, NSString *key) {
     if (!object || object == NSNull.null) return nil;
     if ([object isKindOfClass:NSDictionary.class]) return ((NSDictionary *)object)[key];
     @try { return [object valueForKey:key]; } @catch (NSException *exception) { return nil; }
+}
+
+static id FMTransportGetter(id object, const char *method) {
+    SEL selector = sel_registerName(method);
+    if (!object || ![object respondsToSelector:selector]) return nil;
+    @try { return ((id (*)(id, SEL))objc_msgSend)(object, selector); }
+    @catch (NSException *exception) { return nil; }
+}
+
+static NSString *FMTransportText(id value) {
+    if (!value || value == NSNull.null) return @"[nil]";
+    NSString *text = nil;
+    if ([value isKindOfClass:NSString.class]) text = value;
+    else if ([value isKindOfClass:NSData.class]) text = FMRequestDataText(value);
+    else if ([NSJSONSerialization isValidJSONObject:value]) {
+        NSData *json = [NSJSONSerialization dataWithJSONObject:value options:0 error:nil];
+        text = [[NSString alloc] initWithData:json encoding:NSUTF8StringEncoding];
+    } else if ([value isKindOfClass:NSNumber.class]) text = [value description];
+    if (text.length > 16384) text = [[text substringToIndex:16384] stringByAppendingString:@" [truncated]"];
+    return text ?: [NSString stringWithFormat:@"[class %@]", NSStringFromClass([value class])];
+}
+
+static BOOL FMTransportIsClaim(id object) {
+    for (NSString *getter in @[ @"getApiName", @"apiMethod" ]) {
+        NSString *api = FMSafeValue(FMTransportGetter(object, getter.UTF8String));
+        if ([api.lowercaseString containsString:@"getolivertaskbenefit"]) return YES;
+    }
+    id nested = FMTransportGetter(object, "request") ?: FMTransportGetter(object, "mrequest");
+    for (NSString *key in @[ @"api", @"apiName", @"apiMethod" ]) {
+        NSString *api = FMSafeValue(FMProperty(nested, key));
+        if ([api.lowercaseString containsString:@"getolivertaskbenefit"]) return YES;
+    }
+    return NO;
+}
+
+static void FMLogTransportSnapshot(id object, NSString *stage) {
+    id request = FMTransportGetter(object, "request") ?: FMTransportGetter(object, "mrequest");
+    FMLog([NSString stringWithFormat:@"claim transport stage=%@ class=%@ api=%@ url=%@ biz=%@ ext=%@ headers=%@ data=%@",
+           stage, NSStringFromClass([object class]),
+           FMTransportText(FMTransportGetter(object, "getApiName") ?: FMTransportGetter(object, "apiMethod")),
+           FMTransportText(FMTransportGetter(object, "url")),
+           FMTransportText(FMTransportGetter(object, "getBizParameters")),
+           FMTransportText(FMTransportGetter(object, "getExtParameters")),
+           FMTransportText(FMTransportGetter(object, "getHttpHeaders")),
+           FMTransportText(FMTransportGetter(object, "dataDict"))]);
+    if ([request isKindOfClass:NSURLRequest.class]) {
+        FMLogOutgoingRequest(request, nil, [NSString stringWithFormat:@"%@/NSURLRequest", stage]);
+    } else {
+        NSMutableDictionary *fields = [NSMutableDictionary dictionary];
+        for (NSString *key in @[ @"api", @"apiName", @"url", @"HTTPMethod", @"allHTTPHeaderFields",
+                                 @"HTTPBody", @"headers", @"body", @"params", @"parameters", @"dataDict" ]) {
+            id value = FMProperty(request, key);
+            if (value) fields[key] = FMTransportText(value);
+        }
+        FMLog([NSString stringWithFormat:@"claim transport stage=%@ requestClass=%@ requestFields=%@",
+               stage, request ? NSStringFromClass([request class]) : @"nil", fields]);
+    }
 }
 
 static NSDictionary *FMResponseSummary(id object) {
@@ -508,6 +566,23 @@ static void FMDescribeMtopClasses(void) {
 }
 %end
 
+%hook MtopExtRequest
+- (void)setMrequest:(id)request {
+    BOOL claim = FMClaimActive() && FMTransportIsClaim(self);
+    %orig;
+    if (claim) FMLogTransportSnapshot(self, @"MtopExtRequest/setMrequest:");
+}
+%end
+
+%hook TBSDKMTOPServer
+- (void)startAsync4jRequest {
+    BOOL claim = FMClaimActive() && FMTransportIsClaim(self);
+    if (claim) FMLogTransportSnapshot(self, @"TBSDKMTOPServer/before-start");
+    %orig;
+    if (claim) FMLogTransportSnapshot(self, @"TBSDKMTOPServer/after-start");
+}
+%end
+
 %hook WKScriptMessage
 - (id)body {
     id value = %orig;
@@ -627,7 +702,7 @@ static void FMDescribeMtopClasses(void) {
 
 %ctor {
     if (![NSBundle.mainBundle.bundleIdentifier isEqualToString:@"com.taobao.fleamarket"]) return;
-    FMLog(@"loaded version=1.3.0 stage=read-only MTOP transport method discovery");
+    FMLog(@"loaded version=1.4.0 stage=read-only Oliver MTOP transport snapshots");
     %init;
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         FMDescribeMtopClasses();

@@ -2,6 +2,9 @@
 
 ## FleamarketClaimLog 1.0.0
 
+- 1.3.0 on-device log (2026-09-17 17:28 GMT+08:00) confirms `MtopExtRequest` getters `getApiName/getBizParameters/getExtParameters/getHttpHeaders/mrequest` and setter `setMrequest:`; `TBSDKMTOPServer` has `apiMethod/dataDict/request/url/startAsync4jRequest` with verified Objective-C type encodings. Four claim callbacks still return `FAIL_BIZ_IDL_COIN_TASK_RMB_CHECK_ERROR`; no URLSession wire request is visible.
+- 1.4.0 adds narrowly scoped, read-only transport snapshots at `MtopExtRequest.setMrequest:` and before/after `TBSDKMTOPServer.startAsync4jRequest`, only if the object API matches the Oliver claim. Snapshot visibility, post-signing completeness, and on-device stability are pending validation.
+
 - 1.2.0 on-device log (2026-09-17 17:18 GMT+08:00) has four `MtopWVPlugin.send` claim calls, all with `FAIL_BIZ_IDL_COIN_TASK_RMB_CHECK_ERROR`, and zero `claim outgoing` lines. Among visible bridge payload fields, `asac` and `sceneId` are constant; `deliveryId` has two values. The final wire request remains uncaptured; do not infer which local signal causes server rejection.
 - 1.3.0 adds a one-time, metadata-only runtime selector/type-encoding inventory for likely MTOP transport classes upon the confirmed claim call. Use the resulting device log to select a safe narrow hook; no request values are changed.
 

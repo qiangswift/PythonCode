@@ -1,4 +1,6 @@
-# 闲鱼领取诊断 1.3.0
+# 闲鱼领取诊断 1.4.0
+
+1.4.0 uses method signatures confirmed in the 1.3.0 device log to inspect the claim-matching `MtopExtRequest.setMrequest:` and `TBSDKMTOPServer.startAsync4jRequest` paths. It records readable transport request fields before/after sending; when the internal request is an `NSURLRequest`, it also records its method, URL, headers, and body. These are read-only object snapshots and may still precede signing or final serialization; the presence of a `claim transport` line is not by itself proof that every HTTP wire field was captured. Requests for unrelated API names are not recorded.
 
 1.3.0 adds a one-time method-signature inventory for a short list of MTOP transport classes when the confirmed claim bridge call occurs. This is metadata only: it logs class names and selected Objective-C selector/type encodings, never object values. The 1.2.0 device log showed no `claim outgoing` line, so `NSURLSession` did not reveal the final wire request. Use this inventory to choose a verified MTOP send hook in a later version; do not describe the bridge payload as the complete HTTP request.
 

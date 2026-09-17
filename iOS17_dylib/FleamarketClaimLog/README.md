@@ -1,4 +1,6 @@
-# 闲鱼领取诊断 1.4.0
+# 闲鱼领取诊断 1.5.0
+
+1.5.0 keeps existing claim response and bridge logging. Because 1.4.0 did not hit the selected send methods, it traces only claim-named constructors for `MtopExtRequest`, `MtopApiRequest`, and `WXMtopRequest`, plus confirmed request-building methods and `TBSDKMTOPServer.setRequest:`. It also inventories the inherited `TBSDKServer` methods once. These logs identify the construction path; they do not claim to contain the final signed HTTP bytes.
 
 1.4.0 uses method signatures confirmed in the 1.3.0 device log to inspect the claim-matching `MtopExtRequest.setMrequest:` and `TBSDKMTOPServer.startAsync4jRequest` paths. It records readable transport request fields before/after sending; when the internal request is an `NSURLRequest`, it also records its method, URL, headers, and body. These are read-only object snapshots and may still precede signing or final serialization; the presence of a `claim transport` line is not by itself proof that every HTTP wire field was captured. Requests for unrelated API names are not recorded.
 

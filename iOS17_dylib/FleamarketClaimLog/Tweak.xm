@@ -197,6 +197,21 @@ static void FMLogTransportSnapshot(id object, NSString *stage) {
     }
 }
 
+static char FMClaimRequestTag;
+static BOOL FMIsOliverAPIName(id name) {
+    return [FMSafeValue(name).lowercaseString isEqualToString:@"mtop.taobao.idle.task.getolivertaskbenefit"];
+}
+static void FMMarkClaimRequest(id request, NSString *stage) {
+    if (!request) return;
+    objc_setAssociatedObject(request, &FMClaimRequestTag, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    FMLog([NSString stringWithFormat:@"claim request object stage=%@ class=%@",
+           stage, NSStringFromClass([request class])]);
+    FMLogTransportSnapshot(request, stage);
+}
+static BOOL FMIsMarkedClaimRequest(id request) {
+    return [objc_getAssociatedObject(request, &FMClaimRequestTag) boolValue];
+}
+
 static NSDictionary *FMResponseSummary(id object) {
     NSMutableDictionary *summary = [FMObjectFields(object) mutableCopy];
     NSString *api = FMSafeValue(FMProperty(object, @"api"));
@@ -299,7 +314,8 @@ static void FMDescribeCallback(id callback) {
 static void FMDescribeMtopTransport(void) {
     static dispatch_once_t once;
     dispatch_once(&once, ^{
-        NSArray<NSString *> *names = @[ @"MtopExtRequest", @"MtopExtRequestHelper", @"MtopRequest",
+        NSArray<NSString *> *names = @[ @"MtopWVPlugin", @"TBSDKServer",
+                                       @"MtopExtRequest", @"MtopExtRequestHelper", @"MtopRequest",
                                        @"TMtopRequest", @"MtopApiRequest", @"MtopRequestContainer",
                                        @"TBSDKMTOPServer", @"WXMtopRequest" ];
         for (NSString *name in names) {
@@ -567,14 +583,67 @@ static void FMDescribeMtopClasses(void) {
 %end
 
 %hook MtopExtRequest
+- (id)initWithApiName:(NSString *)name apiVersion:(NSString *)version {
+    id result = %orig;
+    if (FMIsOliverAPIName(name)) FMMarkClaimRequest(result, @"MtopExtRequest/init");
+    return result;
+}
+- (id)initWithApiName:(NSString *)name apiVersion:(NSString *)version bizID:(NSString *)bizID {
+    id result = %orig;
+    if (FMIsOliverAPIName(name)) FMMarkClaimRequest(result, @"MtopExtRequest/init-biz");
+    return result;
+}
+- (void)addBizParameters:(id)parameters {
+    %orig;
+    if (FMIsMarkedClaimRequest(self)) FMLogTransportSnapshot(self, @"MtopExtRequest/addBizParameters:");
+}
+- (void)addHttpHeaders:(id)headers {
+    %orig;
+    if (FMIsMarkedClaimRequest(self)) FMLogTransportSnapshot(self, @"MtopExtRequest/addHttpHeaders:");
+}
 - (void)setMrequest:(id)request {
-    BOOL claim = FMClaimActive() && FMTransportIsClaim(self);
+    BOOL claim = FMClaimActive() && (FMIsMarkedClaimRequest(self) || FMTransportIsClaim(self));
     %orig;
     if (claim) FMLogTransportSnapshot(self, @"MtopExtRequest/setMrequest:");
 }
 %end
 
+%hook MtopApiRequest
+- (id)initWithApiName:(NSString *)name version:(NSString *)version {
+    id result = %orig;
+    if (FMIsOliverAPIName(name)) FMMarkClaimRequest(result, @"MtopApiRequest/init");
+    return result;
+}
+- (id)initWithApiName:(NSString *)name version:(NSString *)version bizId:(NSString *)bizId bizTopic:(NSString *)bizTopic {
+    id result = %orig;
+    if (FMIsOliverAPIName(name)) FMMarkClaimRequest(result, @"MtopApiRequest/init-biz");
+    return result;
+}
+- (void)generateMtopRequest {
+    BOOL claim = FMIsMarkedClaimRequest(self);
+    %orig;
+    if (claim) {
+        FMLogTransportSnapshot(self, @"MtopApiRequest/generateMtopRequest");
+        id server = FMTransportGetter(self, "mtopServer");
+        if (server) FMLogTransportSnapshot(server, @"MtopApiRequest/mtopServer");
+    }
+}
+%end
+
+%hook WXMtopRequest
+- (id)initWithApiName:(NSString *)name version:(NSString *)version {
+    id result = %orig;
+    if (FMIsOliverAPIName(name)) FMMarkClaimRequest(result, @"WXMtopRequest/init");
+    return result;
+}
+%end
+
 %hook TBSDKMTOPServer
+- (void)setRequest:(id)request {
+    BOOL claim = FMClaimActive() && (FMIsMarkedClaimRequest(request) || FMTransportIsClaim(request));
+    %orig;
+    if (claim) FMLogTransportSnapshot(self, @"TBSDKMTOPServer/setRequest:");
+}
 - (void)startAsync4jRequest {
     BOOL claim = FMClaimActive() && FMTransportIsClaim(self);
     if (claim) FMLogTransportSnapshot(self, @"TBSDKMTOPServer/before-start");
@@ -702,7 +771,7 @@ static void FMDescribeMtopClasses(void) {
 
 %ctor {
     if (![NSBundle.mainBundle.bundleIdentifier isEqualToString:@"com.taobao.fleamarket"]) return;
-    FMLog(@"loaded version=1.4.0 stage=read-only Oliver MTOP transport snapshots");
+    FMLog(@"loaded version=1.5.0 stage=read-only Oliver request construction trace");
     %init;
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         FMDescribeMtopClasses();

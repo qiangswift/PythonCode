@@ -2,6 +2,9 @@
 
 ## FleamarketClaimLog 1.0.0
 
+- 1.4.0 on-device log (2026-09-17 17:42 GMT+08:00) includes two claim bridge calls and the same `FAIL_BIZ_IDL_COIN_TASK_RMB_CHECK_ERROR`, but neither selected transport hook nor `NSURLSession` hooks fire. The selected path was not the executed one; transport fields remain unknown.
+- 1.5.0 targets request construction with only verified method encodings on `MtopExtRequest`, `MtopApiRequest`, `WXMtopRequest`, and `TBSDKMTOPServer.setRequest:`, and inventories `TBSDKServer` inherited methods. Runtime hook hits and object safety remain to be validated on-device.
+
 - 1.3.0 on-device log (2026-09-17 17:28 GMT+08:00) confirms `MtopExtRequest` getters `getApiName/getBizParameters/getExtParameters/getHttpHeaders/mrequest` and setter `setMrequest:`; `TBSDKMTOPServer` has `apiMethod/dataDict/request/url/startAsync4jRequest` with verified Objective-C type encodings. Four claim callbacks still return `FAIL_BIZ_IDL_COIN_TASK_RMB_CHECK_ERROR`; no URLSession wire request is visible.
 - 1.4.0 adds narrowly scoped, read-only transport snapshots at `MtopExtRequest.setMrequest:` and before/after `TBSDKMTOPServer.startAsync4jRequest`, only if the object API matches the Oliver claim. Snapshot visibility, post-signing completeness, and on-device stability are pending validation.
 

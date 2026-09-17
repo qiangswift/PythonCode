@@ -1,4 +1,6 @@
-# 闲鱼领取诊断 1.0.0
+# 闲鱼领取诊断 1.1.0
+
+1.1.0 verifies the native Block callback signature before wrapping it. Supported `void` signatures with an object response (and optionally an object or BOOL second argument) log the returned error/response while forwarding the exact original arguments to the original Block. Unsupported signatures are left untouched and logged as skipped. This needs on-device validation; a successful build alone does not verify the callback path.
 
 1.0.0 targets `mtop.taobao.idle.task.getolivertaskbenefit` through `MtopWVPlugin.send:withCallback:withWebView:withViewController:`. It records the callback object's class and candidate result selectors to identify the native response path. For this one claim API only, it also records the bridge request payload and matching WebKit cookies locally. This version does not yet claim to capture the server response.
 

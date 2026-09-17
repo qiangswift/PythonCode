@@ -2,6 +2,9 @@
 
 ## FleamarketClaimLog 1.0.0
 
+- 1.0.0 on-device log (2026-09-17 16:43 GMT+08:00) confirms four claim calls: `MtopWVPlugin.send` gets a dictionary request, `__NSMallocBlock__` callback, and `WVWKWebView`. Request payload and cookies logged. Failure alert follows at 16:43:12.090. Block callbacks do not expose useful Objective-C selectors, hence 1.0.0 lacks the server response.
+- 1.1.0 reads the Block ABI signature and conditionally wraps only supported void callbacks with object first argument, forwarding the original arguments and recording the response. On-device signature and actual callback firing still unverified; unsupported callbacks are untouched.
+
 - The 0.9.0 device log identifies `mtop.taobao.idle.task.getolivertaskbenefit` through the `WindVaneCallNative` `MtopWVPlugin.send` bridge at 2026-09-17 16:24:07.357 GMT+08:00; the failure UI follows at 16:24:07.469. The earlier `treasure.hunt.map.init` success is unrelated to claim outcome.
 - 1.0.0 hooks `MtopWVPlugin.send:withCallback:withWebView:withViewController:` to discover the exact callback class/selectors and, with user authorization, logs this claim request payload and related WebKit cookies locally. It does not yet log the server response. Next step: use the callback inventory from an on-device run to instrument the exact response selector.
 - The log now contains sensitive cookies. Never commit or publicly share it. The probe remains read-only; device-risk cause remains unproven.

@@ -2,6 +2,8 @@
 #import <UIKit/UIKit.h>
 #import <WebKit/WebKit.h>
 #import <objc/runtime.h>
+#import <stdint.h>
+#import <string.h>
 
 static NSTimeInterval FMClaimUntil = 0;
 static NSTimeInterval FMPageStartAt = 0;
@@ -210,6 +212,68 @@ static void FMDescribeCallback(id callback) {
     }
 }
 
+typedef struct {
+    void *isa;
+    int flags;
+    int reserved;
+    void (*invoke)(void *, ...);
+    void *descriptor;
+} FMBlockLiteral;
+
+static const char *FMBlockSignature(id callback) {
+    if (!callback || ![NSStringFromClass([callback class]) containsString:@"Block"]) return NULL;
+    FMBlockLiteral *literal = (__bridge FMBlockLiteral *)callback;
+    if (!(literal->flags & (1 << 30)) || !literal->descriptor) return NULL;
+    uintptr_t *descriptor = (uintptr_t *)literal->descriptor;
+    descriptor += 2; // reserved, size
+    if (literal->flags & (1 << 25)) descriptor += 2; // copy, dispose
+    return *(const char **)descriptor;
+}
+
+static void FMRecordClaimCallback(id result) {
+    NSString *payload = nil;
+    if ([NSJSONSerialization isValidJSONObject:result]) {
+        NSData *encoded = [NSJSONSerialization dataWithJSONObject:result options:0 error:nil];
+        payload = [[NSString alloc] initWithData:encoded encoding:NSUTF8StringEncoding];
+    } else if ([result isKindOfClass:NSString.class]) payload = result;
+    if (payload.length > 12000) payload = [[payload substringToIndex:12000] stringByAppendingString:@" [truncated]"];
+    FMLog([NSString stringWithFormat:@"claim bridge callback resultClass=%@ fields=%@ payload=%@",
+           result ? NSStringFromClass([result class]) : @"nil", FMResponseSummary(result),
+           payload ?: @"unavailable"]);
+}
+
+static id FMTraceClaimCallback(id callback) {
+    const char *types = FMBlockSignature(callback);
+    if (!types) { FMLog(@"claim callback wrap skipped: no Block signature"); return callback; }
+    FMLog([NSString stringWithFormat:@"claim callback Block signature=%s", types]);
+    NSMethodSignature *signature = [NSMethodSignature signatureWithObjCTypes:types];
+    if (!signature || signature.methodReturnType[0] != 'v' || signature.numberOfArguments < 2 ||
+        strcmp([signature getArgumentTypeAtIndex:1], "@") != 0) {
+        FMLog(@"claim callback wrap skipped: unsupported return or first argument");
+        return callback;
+    }
+    if (signature.numberOfArguments == 2) {
+        return [^(id result) {
+            FMRecordClaimCallback(result);
+            ((void (^)(id))callback)(result);
+        } copy];
+    }
+    if (signature.numberOfArguments == 3 && strcmp([signature getArgumentTypeAtIndex:2], "@") == 0) {
+        return [^(id result, id extra) {
+            FMRecordClaimCallback(result);
+            ((void (^)(id, id))callback)(result, extra);
+        } copy];
+    }
+    if (signature.numberOfArguments == 3 && strcmp([signature getArgumentTypeAtIndex:2], "B") == 0) {
+        return [^(id result, BOOL success) {
+            FMRecordClaimCallback(result);
+            ((void (^)(id, BOOL))callback)(result, success);
+        } copy];
+    }
+    FMLog(@"claim callback wrap skipped: unsupported argument signature");
+    return callback;
+}
+
 static void FMRecordScriptMessage(NSString *name, id body) {
     if (!FMClaimActive() || [name isEqualToString:@"fmClaimProbe"]) return;
     NSDictionary *dictionary = [body isKindOfClass:NSDictionary.class] ? body : nil;
@@ -370,6 +434,7 @@ static void FMDescribeMtopClasses(void) {
                webView ? NSStringFromClass([webView class]) : @"nil"]);
         FMDescribeCallback(callback);
         FMLogClaimDetails(params, webView);
+        callback = FMTraceClaimCallback(callback);
     }
     %orig;
 }
@@ -477,7 +542,7 @@ static void FMDescribeMtopClasses(void) {
 
 %ctor {
     if (![NSBundle.mainBundle.bundleIdentifier isEqualToString:@"com.taobao.fleamarket"]) return;
-    FMLog(@"loaded version=1.0.0 stage=read-only Oliver claim callback and local auth discovery");
+    FMLog(@"loaded version=1.1.0 stage=read-only Oliver claim callback response probe");
     %init;
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         FMDescribeMtopClasses();

@@ -1,9 +1,34 @@
 #import <Foundation/Foundation.h>
 #import <UIKit/UIKit.h>
+#import <WebKit/WebKit.h>
 #import <objc/runtime.h>
 
 static NSTimeInterval FMClaimUntil = 0;
 static BOOL FMClaimActive(void) { return [NSDate date].timeIntervalSince1970 <= FMClaimUntil; }
+static void FMLog(NSString *line);
+static NSString *FMSafeValue(id value);
+static NSDictionary *FMObjectFields(id object);
+
+@interface FMWebProbe : NSObject <WKScriptMessageHandler>
+@end
+
+@implementation FMWebProbe
+- (void)userContentController:(WKUserContentController *)controller didReceiveScriptMessage:(WKScriptMessage *)message {
+    (void)controller;
+    NSDictionary *body = [message.body isKindOfClass:NSDictionary.class] ? message.body : nil;
+    if (!body) return;
+    NSString *kind = FMSafeValue(body[@"kind"]);
+    NSString *api = FMSafeValue(body[@"api"]);
+    if (![kind isEqualToString:@"request"] && ![kind isEqualToString:@"response"]) return;
+    if (!api || ![api hasPrefix:@"mtop."]) return;
+    if ([kind isEqualToString:@"request"]) {
+        FMLog([NSString stringWithFormat:@"web mtop request api=%@", api]);
+    } else {
+        FMLog([NSString stringWithFormat:@"web mtop response api=%@ status=%@ fields=%@",
+               api, FMSafeValue(body[@"status"]) ?: @"?", FMObjectFields(body[@"fields"]) ]);
+    }
+}
+@end
 
 static NSString *FMLogPath(void) {
     NSString *documents = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES).firstObject;
@@ -63,6 +88,26 @@ static NSDictionary *FMObjectFields(id object) {
     return fields;
 }
 
+static NSString *FMWebScript(void) {
+    return @"(function(){if(window.__fmClaimProbe)return;window.__fmClaimProbe=1;"
+    @"function api(u){var m=String(u||'').toLowerCase().match(/mtop\\.[a-z0-9_.]+/);return m?m[0]:null;}"
+    @"function send(x){try{window.webkit.messageHandlers.fmClaimProbe.postMessage(x)}catch(e){}}"
+    @"function fields(t){try{var o=JSON.parse(t);if(!o||typeof o!=='object')return {};"
+    @"var r={};['ret','code','errorCode','msg','message','success'].forEach(function(k){"
+    @"var v=o[k];if(typeof v==='string'||typeof v==='number'||typeof v==='boolean')r[k]=String(v).slice(0,180);"
+    @"else if(k==='ret'&&Array.isArray(v))r[k]=v.filter(function(x){return typeof x==='string'}).slice(0,4).map(function(x){return x.slice(0,180)});});"
+    @"return r}catch(e){return {}}}"
+    @"var of=window.fetch;if(of)window.fetch=function(i,n){var u=typeof i==='string'?i:(i&&i.url),a=api(u);"
+    @"if(a)send({kind:'request',api:a});return of.apply(this,arguments).then(function(r){"
+    @"if(a){try{r.clone().text().then(function(t){send({kind:'response',api:a,status:r.status,fields:fields(t)})}).catch(function(){})}catch(e){}}return r})};"
+    @"var op=XMLHttpRequest.prototype.open,os=XMLHttpRequest.prototype.send;"
+    @"XMLHttpRequest.prototype.open=function(m,u){this.__fmApi=api(u);return op.apply(this,arguments)};"
+    @"XMLHttpRequest.prototype.send=function(){var a=this.__fmApi;if(a){send({kind:'request',api:a});"
+    @"this.addEventListener('loadend',function(){var t='';try{if(this.responseType===''||this.responseType==='text')t=this.responseText}catch(e){}"
+    @"send({kind:'response',api:a,status:this.status,fields:fields(t)})})}return os.apply(this,arguments)}"
+    @"})();";
+}
+
 static NSDictionary *FMResponseFields(NSData *data) {
     if (!data.length) return @{};
     id json = [NSJSONSerialization JSONObjectWithData:data options:NSJSONReadingFragmentsAllowed error:nil];
@@ -119,11 +164,35 @@ static void FMDescribeMtopClasses(void) {
 
 %hook FMMtopRequestModel
 - (void)setApiName:(NSString *)apiName {
+    if ([apiName.lowercaseString hasPrefix:@"mtop."]) {
+        FMLog([NSString stringWithFormat:@"native mtop api=%@", FMSafeValue(apiName)]);
+    }
     if ([apiName.lowercaseString containsString:@"idle.oliver.batch.issue"]) {
         FMClaimUntil = [NSDate date].timeIntervalSince1970 + 90;
         FMLog(@"claim request started channel=FMMtopRequestModel");
     }
     %orig;
+}
+%end
+
+%hook WKWebView
+- (instancetype)initWithFrame:(CGRect)frame configuration:(WKWebViewConfiguration *)configuration {
+    if (configuration) {
+        @try {
+            WKUserContentController *content = configuration.userContentController;
+            static FMWebProbe *probe;
+            static dispatch_once_t once;
+            dispatch_once(&once, ^{ probe = [FMWebProbe new]; });
+            [content addScriptMessageHandler:probe name:@"fmClaimProbe"];
+            [content addUserScript:[[WKUserScript alloc] initWithSource:FMWebScript()
+                                                      injectionTime:WKUserScriptInjectionTimeAtDocumentStart
+                                                   forMainFrameOnly:NO]];
+            FMLog(@"webview probe attached");
+        } @catch (NSException *exception) {
+            FMLog(@"webview probe attach skipped");
+        }
+    }
+    return %orig;
 }
 %end
 
@@ -175,7 +244,7 @@ static void FMDescribeMtopClasses(void) {
 
 %ctor {
     if (![NSBundle.mainBundle.bundleIdentifier isEqualToString:@"com.taobao.fleamarket"]) return;
-    FMLog(@"loaded version=0.2.0 stage=read-only MTOP claim probe");
+    FMLog(@"loaded version=0.3.0 stage=read-only native and WebView MTOP probe");
     %init;
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         FMDescribeMtopClasses();

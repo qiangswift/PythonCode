@@ -7,6 +7,6 @@ include $(THEOS)/makefiles/common.mk
 TWEAK_NAME = FleamarketClaimLog
 FleamarketClaimLog_FILES = Tweak.xm
 FleamarketClaimLog_CFLAGS = -fobjc-arc
-FleamarketClaimLog_FRAMEWORKS = Foundation UIKit
+FleamarketClaimLog_FRAMEWORKS = Foundation UIKit WebKit
 
 include $(THEOS_MAKE_PATH)/tweak.mk

@@ -1,6 +1,6 @@
-# 闲鱼领取诊断 0.2.0
+# 闲鱼领取诊断 0.3.0
 
-只注入 `com.taobao.fleamarket`；只读记录领取接口的响应状态、业务错误码和错误文案，并记录屏幕出现的两种领取失败文案时间，不更改请求、响应或设备环境。日志位于闲鱼沙盒 `Documents/FleamarketClaimLog.log`。0.2.0 增加 MTOP 请求模型 `setApiName:`、响应模型 `setReturnDO:` 探针，并枚举领取请求类的方法，以定位真实调用链。`mtop returnDO` 只记录领取请求开始后 90 秒内的安全字段；若没有 `claim request started` 或 `mtop returnDO`，不能从本版推断失败原因，请反馈日志和点击时间。
+只注入 `com.taobao.fleamarket`；只读记录领取接口的响应状态、业务错误码和错误文案，并记录屏幕出现的两种领取失败文案时间，不更改请求、响应或设备环境。日志位于闲鱼沙盒 `Documents/FleamarketClaimLog.log`。0.3.0 针对“得骰子赚闲鱼币”页增加原生 MTOP API 名记录，以及 WebView 的 fetch/XHR MTOP API 名和白名单业务错误字段记录。WebView 探针在新建页面时注入，替换 dylib 后须彻底关闭并重开闲鱼，再进入活动页。若请求由页面桥接到原生网络层，WebView 只会留下调用线索；没有业务返回码时不能归因。
 
 日志不包含 URL 查询参数、请求头、Cookie、Token、设备标识或原始响应正文；只提取服务端 `ret`、`code`、`msg` 等错误结果字段（字符串截断为 180 字符）。请仍在分享前核对日志。日志上限 1 MiB，超过后停止记录而非删除已有数据；卸载插件不自动删除日志。
 

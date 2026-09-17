@@ -123,7 +123,8 @@ static void FMDescribeMtopClasses(void) {
 - (void)setText:(NSString *)text {
     if ([text containsString:@"领取失败，请稍后重试"] ||
         [text containsString:@"设备异常，请稍后重试"]) {
-        FMLog([NSString stringWithFormat:@"claim UI alert=%@", text]);
+        FMLog([NSString stringWithFormat:@"claim UI alert=%@",
+               [text containsString:@"设备异常"] ? @"device-abnormal" : @"claim-failed"]);
     }
     %orig;
 }

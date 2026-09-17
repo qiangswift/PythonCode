@@ -23,6 +23,10 @@ static NSDictionary *FMObjectFields(id object);
         FMLog([NSString stringWithFormat:@"web page host=%@", api ?: @"unknown"]);
         return;
     }
+    if ([kind isEqualToString:@"ui-error"] && [api isEqualToString:@"web:claim-failed"]) {
+        FMLog(@"claim UI alert source=WebView");
+        return;
+    }
     if (![kind isEqualToString:@"request"] && ![kind isEqualToString:@"response"] &&
         ![kind isEqualToString:@"bridge"] && ![kind isEqualToString:@"bridge-result"]) return;
     if (!api || !([api hasPrefix:@"mtop."] || [api hasPrefix:@"web:"] || [api hasPrefix:@"bridge:"])) return;
@@ -99,6 +103,25 @@ static NSDictionary *FMObjectFields(id object) {
     return fields;
 }
 
+static id FMProperty(id object, NSString *key) {
+    if (!object || object == NSNull.null) return nil;
+    if ([object isKindOfClass:NSDictionary.class]) return ((NSDictionary *)object)[key];
+    @try { return [object valueForKey:key]; } @catch (NSException *exception) { return nil; }
+}
+
+static NSDictionary *FMResponseSummary(id object) {
+    NSMutableDictionary *summary = [FMObjectFields(object) mutableCopy];
+    for (NSString *key in @[ @"data", @"result", @"error", @"model" ]) {
+        id nested = FMProperty(object, key);
+        if (!nested || nested == NSNull.null) continue;
+        NSDictionary *fields = FMObjectFields(nested);
+        if (fields.count) summary[key] = fields;
+        else if (![nested isKindOfClass:NSDictionary.class] && ![nested isKindOfClass:NSArray.class])
+            summary[[key stringByAppendingString:@".class"]] = NSStringFromClass([nested class]);
+    }
+    return summary;
+}
+
 static NSString *FMWebScript(void) {
     return @"(function(){if(window.__fmClaimProbe)return;window.__fmClaimProbe=1;"
     @"function api(u){try{var x=new URL(String(u||''),location.href);if(!/^https?:$/.test(x.protocol))return null;"
@@ -121,6 +144,11 @@ static NSString *FMWebScript(void) {
     @"return old.apply(this,a)}wrapped.__fmProbe=true;w.call=wrapped;send({kind:'bridge',api:'bridge:installed'})}catch(e){}}"
     @"bridge();setInterval(bridge,750);setTimeout(function(){var w=window.WindVane||window.windvane;"
     @"if(!w||typeof w.call!=='function')send({kind:'bridge',api:'bridge:unavailable'})},3000);"
+    @"var claimShown=false;function checkClaim(){if(claimShown||!document.body)return;"
+    @"if((document.body.innerText||'').indexOf('领取失败，请稍后重试')>=0){claimShown=true;"
+    @"send({kind:'ui-error',api:'web:claim-failed'})}}"
+    @"new MutationObserver(checkClaim).observe(document,{subtree:true,childList:true,characterData:true});"
+    @"setInterval(checkClaim,500);"
     @"var of=window.fetch;if(of)window.fetch=function(i,n){var u=typeof i==='string'?i:(i&&i.url),a=api(u);"
     @"if(a)send({kind:'request',api:a});return of.apply(this,arguments).then(function(r){"
     @"if(a){try{r.clone().text().then(function(t){send({kind:'response',api:a,status:r.status,fields:fields(t)})}).catch(function(){})}catch(e){}}return r})};"
@@ -228,7 +256,7 @@ static void FMDescribeMtopClasses(void) {
 - (void)setReturnDO:(id)returnDO {
     if (FMClaimActive()) {
         FMLog([NSString stringWithFormat:@"mtop returnDO class=%@ fields=%@",
-               returnDO ? NSStringFromClass([returnDO class]) : @"nil", FMObjectFields(returnDO)]);
+               returnDO ? NSStringFromClass([returnDO class]) : @"nil", FMResponseSummary(returnDO)]);
     }
     %orig;
 }
@@ -296,7 +324,7 @@ static void FMDescribeMtopClasses(void) {
 
 %ctor {
     if (![NSBundle.mainBundle.bundleIdentifier isEqualToString:@"com.taobao.fleamarket"]) return;
-    FMLog(@"loaded version=0.6.0 stage=read-only coin response probe");
+    FMLog(@"loaded version=0.7.0 stage=read-only nested coin response probe");
     %init;
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         FMDescribeMtopClasses();

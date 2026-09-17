@@ -25,9 +25,12 @@ XMLHttpRequest.prototype.send = function() {};
 const window = {WindVane: vane, webkit: {messageHandlers: {
   fmClaimProbe: {postMessage: x => messages.push(x)}
 }}};
+function MutationObserver() {}
+MutationObserver.prototype.observe = function() {};
 vm.runInNewContext(process.argv[1], {
   window, location: {hostname: 'ssr.m.goofish.com'},
-  XMLHttpRequest, URL, setInterval: () => 0, setTimeout: () => 0
+  XMLHttpRequest, MutationObserver, document: {}, URL,
+  setInterval: () => 0, setTimeout: () => 0
 });
 vane.call('WVTest', 'take', {}, function() {});
 assert(messages.some(x => x.kind === 'bridge' && x.api === 'bridge:WVTest/take'));

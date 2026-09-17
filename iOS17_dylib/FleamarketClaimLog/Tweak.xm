@@ -23,13 +23,14 @@ static NSDictionary *FMObjectFields(id object);
         FMLog([NSString stringWithFormat:@"web page host=%@", api ?: @"unknown"]);
         return;
     }
-    if (![kind isEqualToString:@"request"] && ![kind isEqualToString:@"response"]) return;
-    if (!api || !([api hasPrefix:@"mtop."] || [api hasPrefix:@"web:"])) return;
-    if ([kind isEqualToString:@"request"]) {
-        FMLog([NSString stringWithFormat:@"web request api=%@", api]);
+    if (![kind isEqualToString:@"request"] && ![kind isEqualToString:@"response"] &&
+        ![kind isEqualToString:@"bridge"] && ![kind isEqualToString:@"bridge-result"]) return;
+    if (!api || !([api hasPrefix:@"mtop."] || [api hasPrefix:@"web:"] || [api hasPrefix:@"bridge:"])) return;
+    if ([kind isEqualToString:@"request"] || [kind isEqualToString:@"bridge"]) {
+        FMLog([NSString stringWithFormat:@"%@ api=%@", kind, api]);
     } else {
-        FMLog([NSString stringWithFormat:@"web response api=%@ status=%@ fields=%@",
-               api, FMSafeValue(body[@"status"]) ?: @"?", FMObjectFields(body[@"fields"]) ]);
+        FMLog([NSString stringWithFormat:@"%@ api=%@ status=%@ fields=%@",
+               kind, api, FMSafeValue(body[@"status"]) ?: @"?", FMObjectFields(body[@"fields"])]);
     }
 }
 @end
@@ -110,6 +111,16 @@ static NSString *FMWebScript(void) {
     @"var v=o[k];if(typeof v==='string'||typeof v==='number'||typeof v==='boolean')r[k]=String(v).slice(0,180);"
     @"else if(k==='ret'&&Array.isArray(v))r[k]=v.filter(function(x){return typeof x==='string'}).slice(0,4).map(function(x){return x.slice(0,180)});});"
     @"return r}catch(e){return {}}}"
+    @"function bridge(){try{var w=window.WindVane||window.windvane;if(!w||typeof w.call!=='function'||w.call.__fmProbe)return;"
+    @"var old=w.call;function wrapped(){var a=Array.prototype.slice.call(arguments);"
+    @"var c=String(a[0]||'').replace(/[^a-z0-9_.-]/gi,'_').slice(0,70),m=String(a[1]||'').replace(/[^a-z0-9_.-]/gi,'_').slice(0,70);"
+    @"var label='bridge:'+c+'/'+m;send({kind:'bridge',api:label});"
+    @"[3,4].forEach(function(j){if(typeof a[j]==='function'){var cb=a[j];a[j]=function(){"
+    @"var d={};try{d=fields(typeof arguments[0]==='string'?arguments[0]:JSON.stringify(arguments[0]))}catch(e){}"
+    @"send({kind:'bridge-result',api:label,status:j===3?'success':'failure',fields:d});return cb.apply(this,arguments)}}});"
+    @"return old.apply(this,a)}wrapped.__fmProbe=true;w.call=wrapped;send({kind:'bridge',api:'bridge:installed'})}catch(e){}}"
+    @"bridge();setInterval(bridge,750);setTimeout(function(){var w=window.WindVane||window.windvane;"
+    @"if(!w||typeof w.call!=='function')send({kind:'bridge',api:'bridge:unavailable'})},3000);"
     @"var of=window.fetch;if(of)window.fetch=function(i,n){var u=typeof i==='string'?i:(i&&i.url),a=api(u);"
     @"if(a)send({kind:'request',api:a});return of.apply(this,arguments).then(function(r){"
     @"if(a){try{r.clone().text().then(function(t){send({kind:'response',api:a,status:r.status,fields:fields(t)})}).catch(function(){})}catch(e){}}return r})};"
@@ -274,7 +285,7 @@ static void FMDescribeMtopClasses(void) {
 
 %ctor {
     if (![NSBundle.mainBundle.bundleIdentifier isEqualToString:@"com.taobao.fleamarket"]) return;
-    FMLog(@"loaded version=0.4.0 stage=read-only native and WebView request probe");
+    FMLog(@"loaded version=0.5.0 stage=read-only WindVane bridge probe");
     %init;
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         FMDescribeMtopClasses();

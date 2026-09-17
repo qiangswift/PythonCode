@@ -122,6 +122,42 @@ static NSDictionary *FMResponseSummary(id object) {
     return summary;
 }
 
+static NSString *FMSafeIdentifier(id value) {
+    NSString *candidate = FMSafeValue(value);
+    if (!candidate || candidate.length > 80) return nil;
+    static NSCharacterSet *invalid;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        invalid = [[NSCharacterSet characterSetWithCharactersInString:
+                    @"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_.-"] invertedSet];
+    });
+    return [candidate rangeOfCharacterFromSet:invalid].location == NSNotFound ? candidate : nil;
+}
+
+static void FMRecordScriptMessage(NSString *name, id body) {
+    if (!FMClaimActive() || [name isEqualToString:@"fmClaimProbe"]) return;
+    static unsigned int count = 0;
+    if (++count > 150) return;
+    NSDictionary *dictionary = [body isKindOfClass:NSDictionary.class] ? body : nil;
+    if (!dictionary && [body isKindOfClass:NSString.class] && [body length] < 32768) {
+        id parsed = [NSJSONSerialization JSONObjectWithData:[body dataUsingEncoding:NSUTF8StringEncoding]
+                                                options:0 error:nil];
+        if ([parsed isKindOfClass:NSDictionary.class]) dictionary = parsed;
+    }
+    NSMutableArray *keys = [NSMutableArray array];
+    for (id key in dictionary) {
+        NSString *safe = FMSafeIdentifier(key);
+        if (safe && keys.count < 20) [keys addObject:safe];
+    }
+    NSMutableDictionary *identifiers = [NSMutableDictionary dictionary];
+    for (NSString *key in @[ @"api", @"apiName", @"class", @"className", @"method", @"action", @"service" ]) {
+        NSString *safe = FMSafeIdentifier(dictionary[key]);
+        if (safe) identifiers[key] = safe;
+    }
+    FMLog([NSString stringWithFormat:@"script message name=%@ bodyClass=%@ keys=%@ identifiers=%@",
+           FMSafeIdentifier(name) ?: @"other", NSStringFromClass([body class]), keys, identifiers]);
+}
+
 static NSString *FMWebScript(void) {
     return @"(function(){if(window.__fmClaimProbe)return;window.__fmClaimProbe=1;"
     @"function api(u){try{var x=new URL(String(u||''),location.href);if(!/^https?:$/.test(x.protocol))return null;"
@@ -198,7 +234,7 @@ static void FMRecord(NSURL *url, NSData *data, NSURLResponse *response, NSError 
 }
 
 static void FMDescribeMtopClasses(void) {
-    for (NSString *name in @[ @"FMMtopRequestModel", @"FMMtopResponseModel", @"FMNetMtopRequest", @"XSearchSwift.OliverBatchIssueRequest", @"OliverBatchIssueRequest" ]) {
+    for (NSString *name in @[ @"FMMtopReturnDO" ]) {
         Class cls = NSClassFromString(name);
         if (!cls) { FMLog([NSString stringWithFormat:@"mtop runtime class=%@ unavailable", name]); continue; }
         unsigned int count = 0;
@@ -228,6 +264,14 @@ static void FMDescribeMtopClasses(void) {
         FMLog(@"coin page response window opened");
     }
     %orig;
+}
+%end
+
+%hook WKScriptMessage
+- (id)body {
+    id value = %orig;
+    FMRecordScriptMessage(self.name, value);
+    return value;
 }
 %end
 
@@ -324,7 +368,7 @@ static void FMDescribeMtopClasses(void) {
 
 %ctor {
     if (![NSBundle.mainBundle.bundleIdentifier isEqualToString:@"com.taobao.fleamarket"]) return;
-    FMLog(@"loaded version=0.7.0 stage=read-only nested coin response probe");
+    FMLog(@"loaded version=0.8.0 stage=read-only WebKit message probe");
     %init;
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         FMDescribeMtopClasses();

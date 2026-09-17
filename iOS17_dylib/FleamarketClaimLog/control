@@ -1,6 +1,6 @@
 Package: com.swiftss.fleamarketclaimlog
 Name: 闲鱼领取诊断
-Version: 0.7.0
+Version: 0.8.0
 Architecture: iphoneos-arm
 Description: Redacted read-only claim response diagnostics for Xianyu.
 Maintainer: swiftss

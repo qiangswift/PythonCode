@@ -18,6 +18,7 @@ jobs:
           repository: roothide/theos
           path: theos-roothide
           submodules: recursive
+      - run: python3 iOS17_dylib/FleamarketClaimLog/tests/check_web_script.py
       - run: brew install ldid xz
       - working-directory: iOS17_dylib/FleamarketClaimLog
         env:

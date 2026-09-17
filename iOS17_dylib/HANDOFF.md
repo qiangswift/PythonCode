@@ -2,6 +2,9 @@
 
 ## FleamarketClaimLog 1.0.0
 
+- 1.1.1 on-device log (2026-09-17 16:56 GMT+08:00) captured six claim callback failures: `FAIL_BIZ_IDL_COIN_TASK_RMB_CHECK_ERROR`; HTTP response status 200 and `MtopErrorMsg` equals the same code. The user-facing alert follows the first callback by about 11 ms. This proves server-side business validation failure, not its precise cause. Bridge request `data` keys are `deliveryId`, `asac`, `sceneId`; lower MTOP layers may append device/signature information.
+- 1.2.0 adds a narrow, opt-in `NSURLSession` outgoing URL/method/header/body logger for the claim API, retaining the bridge and callback baseline. If no `claim outgoing` line appears, do not infer that wire headers/body were captured. Request and Cookie values in the local log are sensitive and must not be published.
+
 - 1.1.0 on-device log (2026-09-17 16:51 GMT+08:00) shows the actual Block signature `v24@?0@"NSString"8@"NSDictionary"16` for all four claim attempts. Strict comparison to `@` incorrectly skipped these class-qualified object encodings. 1.1.1 matches object encoding by leading `@` and captures status plus response dictionary without changing original callback arguments. The actual on-device response remains pending.
 
 - 1.0.0 on-device log (2026-09-17 16:43 GMT+08:00) confirms four claim calls: `MtopWVPlugin.send` gets a dictionary request, `__NSMallocBlock__` callback, and `WVWKWebView`. Request payload and cookies logged. Failure alert follows at 16:43:12.090. Block callbacks do not expose useful Objective-C selectors, hence 1.0.0 lacks the server response.

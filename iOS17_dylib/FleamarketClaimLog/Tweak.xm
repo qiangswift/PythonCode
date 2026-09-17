@@ -73,8 +73,34 @@ static void FMLog(NSString *line) {
 
 static BOOL FMIsClaimURL(NSURL *url) {
     NSString *value = url.absoluteString.lowercaseString ?: @"";
-    return [value containsString:@"mtop.taobao.idle.oliver.batch.issue"] ||
+    return [value containsString:@"mtop.taobao.idle.task.getolivertaskbenefit"] ||
+           [value containsString:@"idle.task.getolivertaskbenefit"] ||
+           [value containsString:@"mtop.taobao.idle.oliver.batch.issue"] ||
            [value containsString:@"idle.oliver.batch.issue"];
+}
+
+static BOOL FMIsClaimRequest(NSURLRequest *request, NSData *uploadBody) {
+    if (FMIsClaimURL(request.URL)) return YES;
+    NSData *body = uploadBody ?: request.HTTPBody;
+    if (!body.length || body.length > 131072) return NO;
+    NSString *text = [[NSString alloc] initWithData:body encoding:NSUTF8StringEncoding];
+    return [text.lowercaseString containsString:@"getolivertaskbenefit"];
+}
+
+static NSString *FMRequestDataText(NSData *data) {
+    if (!data.length) return @"[empty or stream]";
+    NSData *sample = data.length > 32768 ? [data subdataWithRange:NSMakeRange(0, 32768)] : data;
+    NSString *text = [[NSString alloc] initWithData:sample encoding:NSUTF8StringEncoding];
+    if (!text) text = [NSString stringWithFormat:@"[base64] %@", [sample base64EncodedStringWithOptions:0]];
+    return data.length > sample.length ? [text stringByAppendingString:@" [truncated]"] : text;
+}
+
+static void FMLogOutgoingRequest(NSURLRequest *request, NSData *uploadBody, NSString *channel) {
+    NSString *url = request.URL.absoluteString ?: @"";
+    if (url.length > 8192) url = [[url substringToIndex:8192] stringByAppendingString:@" [truncated]"];
+    FMLog([NSString stringWithFormat:@"claim outgoing channel=%@ method=%@ url=%@ headers=%@ body=%@",
+           channel, request.HTTPMethod ?: @"GET", url, request.allHTTPHeaderFields ?: @{},
+           FMRequestDataText(uploadBody ?: request.HTTPBody)]);
 }
 
 static NSString *FMSafeValue(id value) {
@@ -389,7 +415,7 @@ static NSDictionary *FMResponseFields(NSData *data) {
 static void FMRecord(NSURL *url, NSData *data, NSURLResponse *response, NSError *error) {
     (void)url;
     NSInteger status = [response isKindOfClass:NSHTTPURLResponse.class] ? ((NSHTTPURLResponse *)response).statusCode : 0;
-    // Never record full URLs, request bodies, headers, or raw response data.
+    // Keep the response summary separate from the opt-in outgoing request record.
     FMLog([NSString stringWithFormat:@"claim response status=%ld errorDomain=%@ errorCode=%ld fields=%@",
            (long)status, error.domain ?: @"none", (long)error.code, FMResponseFields(data)]);
 }
@@ -493,8 +519,8 @@ static void FMDescribeMtopClasses(void) {
 %hook NSURLSession
 - (NSURLSessionDataTask *)dataTaskWithRequest:(NSURLRequest *)request
                             completionHandler:(void (^)(NSData *, NSURLResponse *, NSError *))completionHandler {
-    if (!FMIsClaimURL(request.URL)) return %orig;
-    FMLog(@"claim request started channel=NSURLSession/request");
+    if (!FMIsClaimRequest(request, nil)) return %orig;
+    FMLogOutgoingRequest(request, nil, @"NSURLSession/dataTaskWithRequest:completionHandler:");
     if (!completionHandler) return %orig;
     void (^wrapped)(NSData *, NSURLResponse *, NSError *) = ^(NSData *data, NSURLResponse *response, NSError *error) {
         FMRecord(request.URL, data, response, error);
@@ -505,13 +531,30 @@ static void FMDescribeMtopClasses(void) {
 - (NSURLSessionDataTask *)dataTaskWithURL:(NSURL *)url
                         completionHandler:(void (^)(NSData *, NSURLResponse *, NSError *))completionHandler {
     if (!FMIsClaimURL(url)) return %orig;
-    FMLog(@"claim request started channel=NSURLSession/url");
+    FMLog([NSString stringWithFormat:@"claim outgoing channel=NSURLSession/dataTaskWithURL:completionHandler: url=%@",
+           url.absoluteString ?: @""]);
     if (!completionHandler) return %orig;
     void (^wrapped)(NSData *, NSURLResponse *, NSError *) = ^(NSData *data, NSURLResponse *response, NSError *error) {
         FMRecord(url, data, response, error);
         completionHandler(data, response, error);
     };
     return %orig(url, wrapped);
+}
+- (NSURLSessionDataTask *)dataTaskWithRequest:(NSURLRequest *)request {
+    if (FMIsClaimRequest(request, nil)) FMLogOutgoingRequest(request, nil, @"NSURLSession/dataTaskWithRequest:");
+    return %orig;
+}
+- (NSURLSessionUploadTask *)uploadTaskWithRequest:(NSURLRequest *)request
+                                          fromData:(NSData *)bodyData
+                                 completionHandler:(void (^)(NSData *, NSURLResponse *, NSError *))completionHandler {
+    if (!FMIsClaimRequest(request, bodyData)) return %orig;
+    FMLogOutgoingRequest(request, bodyData, @"NSURLSession/uploadTaskWithRequest:fromData:completionHandler:");
+    if (!completionHandler) return %orig;
+    void (^wrapped)(NSData *, NSURLResponse *, NSError *) = ^(NSData *data, NSURLResponse *response, NSError *error) {
+        FMRecord(request.URL, data, response, error);
+        completionHandler(data, response, error);
+    };
+    return %orig(request, bodyData, wrapped);
 }
 %end
 
@@ -546,7 +589,7 @@ static void FMDescribeMtopClasses(void) {
 
 %ctor {
     if (![NSBundle.mainBundle.bundleIdentifier isEqualToString:@"com.taobao.fleamarket"]) return;
-    FMLog(@"loaded version=1.1.1 stage=read-only typed Oliver claim callback probe");
+    FMLog(@"loaded version=1.2.0 stage=read-only Oliver claim bridge and URLSession request probe");
     %init;
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         FMDescribeMtopClasses();

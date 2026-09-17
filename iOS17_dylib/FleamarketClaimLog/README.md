@@ -1,4 +1,6 @@
-# 闲鱼领取诊断 1.1.1
+# 闲鱼领取诊断 1.2.0
+
+1.2.0 keeps the confirmed WindVane claim request and callback logs, and additionally records matching `NSURLSession` outgoing request URL, method, headers, and body (including an upload body) when the claim API appears in the URL or body. This is a best-effort network-layer probe, not proof that MTOP uses `NSURLSession`; if no `claim outgoing` line appears, the bridge request and callback remain the evidence, while the actual wire format is still unknown. No request, response, or device value is changed. Compare a failed and a later successful attempt made with the same plugin version and app version.
 
 1.1.1 accepts both plain `@` and class-qualified object encodings such as `@"NSString"`. The observed claim callback has signature `void (^)(NSString *, NSDictionary *)`; the first argument is logged as callback status, and the second as the result payload, before forwarding both unchanged. On-device response logging still needs verification.
 

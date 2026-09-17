@@ -1,4 +1,6 @@
-# 闲鱼领取诊断 1.5.0
+# 闲鱼领取诊断 1.6.0
+
+1.6.0 follows the request path confirmed on-device in 1.5.0. It captures the claim-specific `TBSDKServer` URL, params, request headers and underlying `TBSDKRequest` metadata at request/header assignment points, and enumerates `TBSDKRequest` selectors once for the next targeted probe if necessary. The headers seen in 1.5.0 include `x-uid`, `x-utdid`, `x-ua`, and `x-features`; these are device/account metadata, not proof of which server-side rule rejected the claim. The actual final signed network bytes may still differ from these object snapshots.
 
 1.5.0 keeps existing claim response and bridge logging. Because 1.4.0 did not hit the selected send methods, it traces only claim-named constructors for `MtopExtRequest`, `MtopApiRequest`, and `WXMtopRequest`, plus confirmed request-building methods and `TBSDKMTOPServer.setRequest:`. It also inventories the inherited `TBSDKServer` methods once. These logs identify the construction path; they do not claim to contain the final signed HTTP bytes.
 

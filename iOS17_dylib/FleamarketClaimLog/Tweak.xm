@@ -165,7 +165,8 @@ static BOOL FMTransportIsClaim(id object) {
         NSString *api = FMSafeValue(FMTransportGetter(object, getter.UTF8String));
         if ([api.lowercaseString containsString:@"getolivertaskbenefit"]) return YES;
     }
-    id nested = FMTransportGetter(object, "request") ?: FMTransportGetter(object, "mrequest");
+    id nested = FMTransportGetter(object, "request") ?: FMTransportGetter(object, "mrequest")
+             ?: FMTransportGetter(object, "tbsdkRequest");
     for (NSString *key in @[ @"api", @"apiName", @"apiMethod" ]) {
         NSString *api = FMSafeValue(FMProperty(nested, key));
         if ([api.lowercaseString containsString:@"getolivertaskbenefit"]) return YES;
@@ -194,6 +195,25 @@ static void FMLogTransportSnapshot(id object, NSString *stage) {
         }
         FMLog([NSString stringWithFormat:@"claim transport stage=%@ requestClass=%@ requestFields=%@",
                stage, request ? NSStringFromClass([request class]) : @"nil", fields]);
+    }
+    if ([object respondsToSelector:sel_registerName("tbsdkRequest")]) {
+        id wire = FMTransportGetter(object, "tbsdkRequest");
+        FMLog([NSString stringWithFormat:@"claim transport stage=%@ serverURL=%@ serverParams=%@ serverHeaders=%@ wireClass=%@",
+               stage, FMTransportText(FMTransportGetter(object, "mainURLForRequest")),
+               FMTransportText(FMTransportGetter(object, "params")),
+               FMTransportText(FMTransportGetter(object, "requestHeaders")),
+               wire ? NSStringFromClass([wire class]) : @"nil"]);
+        if ([wire isKindOfClass:NSURLRequest.class]) {
+            FMLogOutgoingRequest(wire, nil, [NSString stringWithFormat:@"%@/TBSDKRequest", stage]);
+        } else if (wire) {
+            NSMutableDictionary *wireFields = [NSMutableDictionary dictionary];
+            for (NSString *key in @[ @"apiName", @"url", @"requestURL", @"HTTPMethod", @"allHTTPHeaderFields",
+                                     @"HTTPBody", @"headers", @"body", @"params", @"parameters", @"dataDict" ]) {
+                id value = FMProperty(wire, key);
+                if (value) wireFields[key] = FMTransportText(value);
+            }
+            FMLog([NSString stringWithFormat:@"claim transport stage=%@ wireFields=%@", stage, wireFields]);
+        }
     }
 }
 
@@ -314,7 +334,7 @@ static void FMDescribeCallback(id callback) {
 static void FMDescribeMtopTransport(void) {
     static dispatch_once_t once;
     dispatch_once(&once, ^{
-        NSArray<NSString *> *names = @[ @"MtopWVPlugin", @"TBSDKServer",
+        NSArray<NSString *> *names = @[ @"MtopWVPlugin", @"TBSDKServer", @"TBSDKRequest",
                                        @"MtopExtRequest", @"MtopExtRequestHelper", @"MtopRequest",
                                        @"TMtopRequest", @"MtopApiRequest", @"MtopRequestContainer",
                                        @"TBSDKMTOPServer", @"WXMtopRequest" ];
@@ -642,13 +662,31 @@ static void FMDescribeMtopClasses(void) {
 - (void)setRequest:(id)request {
     BOOL claim = FMClaimActive() && (FMIsMarkedClaimRequest(request) || FMTransportIsClaim(request));
     %orig;
-    if (claim) FMLogTransportSnapshot(self, @"TBSDKMTOPServer/setRequest:");
+    if (claim) FMMarkClaimRequest(self, @"TBSDKMTOPServer/setRequest:");
+}
+- (void)addRequestHeader:(id)header value:(id)value {
+    %orig;
+    if (FMIsMarkedClaimRequest(self)) FMLogTransportSnapshot(self, @"TBSDKMTOPServer/addRequestHeader:value:");
 }
 - (void)startAsync4jRequest {
-    BOOL claim = FMClaimActive() && FMTransportIsClaim(self);
+    BOOL claim = FMClaimActive() && (FMIsMarkedClaimRequest(self) || FMTransportIsClaim(self));
     if (claim) FMLogTransportSnapshot(self, @"TBSDKMTOPServer/before-start");
     %orig;
     if (claim) FMLogTransportSnapshot(self, @"TBSDKMTOPServer/after-start");
+}
+%end
+
+%hook TBSDKServer
+- (void)setTbsdkRequest:(id)request {
+    BOOL claim = FMClaimActive() && (FMIsMarkedClaimRequest(self) || FMTransportIsClaim(self)
+                                 || FMTransportIsClaim(request));
+    %orig;
+    if (claim) FMLogTransportSnapshot(self, @"TBSDKServer/setTbsdkRequest:");
+}
+- (void)setRequestHeaders:(id)headers {
+    BOOL claim = FMClaimActive() && (FMIsMarkedClaimRequest(self) || FMTransportIsClaim(self));
+    %orig;
+    if (claim) FMLogTransportSnapshot(self, @"TBSDKServer/setRequestHeaders:");
 }
 %end
 
@@ -771,7 +809,7 @@ static void FMDescribeMtopClasses(void) {
 
 %ctor {
     if (![NSBundle.mainBundle.bundleIdentifier isEqualToString:@"com.taobao.fleamarket"]) return;
-    FMLog(@"loaded version=1.5.0 stage=read-only Oliver request construction trace");
+    FMLog(@"loaded version=1.6.0 stage=read-only Oliver TBSDK request headers probe");
     %init;
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         FMDescribeMtopClasses();

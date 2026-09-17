@@ -2,6 +2,9 @@
 
 ## FleamarketClaimLog 1.0.0
 
+- 1.5.0 on-device log (2026-09-17 18:35 GMT+08:00) confirms the claim construction chain `MtopExtRequest(init-biz)` -> `TBSDKRequest` -> `TBSDKMTOPServer.setRequest:` -> `MtopApiRequest(init-biz/generateMtopRequest)` -> `MtopExtRequest.addHttpHeaders:`. At the last stage, business keys are `deliveryId/asac/sceneId`, extension keys `type/asac/rnd`, and header names include `x-uid/x-utdid/x-ua/x-features` plus locale/referrer values. Both claim callbacks still return `FAIL_BIZ_IDL_COIN_TASK_RMB_CHECK_ERROR`. Header presence does not establish which server-side rule rejected the claim.
+- 1.6.0 hooks confirmed `TBSDKServer.setTbsdkRequest:/setRequestHeaders:` and `TBSDKMTOPServer.addRequestHeader:value:` to inspect scoped server headers and underlying request metadata, and inventories `TBSDKRequest` methods. Final signed wire fields and on-device stability remain unverified.
+
 - 1.4.0 on-device log (2026-09-17 17:42 GMT+08:00) includes two claim bridge calls and the same `FAIL_BIZ_IDL_COIN_TASK_RMB_CHECK_ERROR`, but neither selected transport hook nor `NSURLSession` hooks fire. The selected path was not the executed one; transport fields remain unknown.
 - 1.5.0 targets request construction with only verified method encodings on `MtopExtRequest`, `MtopApiRequest`, `WXMtopRequest`, and `TBSDKMTOPServer.setRequest:`, and inventories `TBSDKServer` inherited methods. Runtime hook hits and object safety remain to be validated on-device.
 

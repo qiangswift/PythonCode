@@ -1,5 +1,11 @@
 # iOS17_dylib 项目交接
 
+## FleamarketClaimLog 1.0.0
+
+- The 0.9.0 device log identifies `mtop.taobao.idle.task.getolivertaskbenefit` through the `WindVaneCallNative` `MtopWVPlugin.send` bridge at 2026-09-17 16:24:07.357 GMT+08:00; the failure UI follows at 16:24:07.469. The earlier `treasure.hunt.map.init` success is unrelated to claim outcome.
+- 1.0.0 hooks `MtopWVPlugin.send:withCallback:withWebView:withViewController:` to discover the exact callback class/selectors and, with user authorization, logs this claim request payload and related WebKit cookies locally. It does not yet log the server response. Next step: use the callback inventory from an on-device run to instrument the exact response selector.
+- The log now contains sensitive cookies. Never commit or publicly share it. The probe remains read-only; device-risk cause remains unproven.
+
 ## QDReaderAutoCheckin 1.5.7
 
 - The bookshelf game entry is removed from the native button stack and guarded

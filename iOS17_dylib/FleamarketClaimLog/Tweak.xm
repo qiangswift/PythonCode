@@ -144,6 +144,72 @@ static NSString *FMSafeIdentifier(id value) {
     return [candidate rangeOfCharacterFromSet:invalid].location == NSNotFound ? candidate : nil;
 }
 
+static BOOL FMIsOliverClaimCall(id params) {
+    NSDictionary *dictionary = [params isKindOfClass:NSDictionary.class] ? params : nil;
+    if (!dictionary && [params isKindOfClass:NSString.class] && [params length] < 32768) {
+        id parsed = [NSJSONSerialization JSONObjectWithData:[params dataUsingEncoding:NSUTF8StringEncoding]
+                                                options:0 error:nil];
+        if ([parsed isKindOfClass:NSDictionary.class]) dictionary = parsed;
+    }
+    NSString *api = FMSafeIdentifier(dictionary[@"api"]);
+    return [api.lowercaseString isEqualToString:@"mtop.taobao.idle.task.getolivertaskbenefit"];
+}
+
+static void FMLogClaimDetails(id params, id webView) {
+    id value = params;
+    if ([value isKindOfClass:NSString.class] && [value length] < 32768) {
+        id parsed = [NSJSONSerialization JSONObjectWithData:[value dataUsingEncoding:NSUTF8StringEncoding]
+                                                options:0 error:nil];
+        if (parsed) value = parsed;
+    }
+    NSString *request = nil;
+    if ([NSJSONSerialization isValidJSONObject:value]) {
+        NSData *encoded = [NSJSONSerialization dataWithJSONObject:value options:0 error:nil];
+        request = [[NSString alloc] initWithData:encoded encoding:NSUTF8StringEncoding];
+    } else if ([value isKindOfClass:NSString.class]) request = value;
+    if (request.length > 16384) request = [[request substringToIndex:16384] stringByAppendingString:@" [truncated]"];
+    FMLog([NSString stringWithFormat:@"claim request payload=%@", request ?: @"unavailable"]);
+
+    if (![webView isKindOfClass:WKWebView.class]) return;
+    WKHTTPCookieStore *store = ((WKWebView *)webView).configuration.websiteDataStore.httpCookieStore;
+    [store getAllCookies:^(NSArray<NSHTTPCookie *> *cookies) {
+        NSMutableArray *matches = [NSMutableArray array];
+        for (NSHTTPCookie *cookie in cookies) {
+            NSString *domain = cookie.domain.lowercaseString;
+            if (![domain hasSuffix:@"taobao.com"] && ![domain hasSuffix:@"goofish.com"] &&
+                ![domain hasSuffix:@"alibaba.com"] && ![domain hasSuffix:@"tmall.com"]) continue;
+            if (matches.count >= 80) break;
+            [matches addObject:@{ @"domain": cookie.domain ?: @"", @"name": cookie.name ?: @"",
+                                  @"value": cookie.value ?: @"" }];
+        }
+        FMLog([NSString stringWithFormat:@"claim web cookies=%@", matches]);
+    }];
+}
+
+static void FMDescribeCallback(id callback) {
+    if (!callback) { FMLog(@"claim bridge callback=nil"); return; }
+    Class cls = object_getClass(callback);
+    for (NSUInteger depth = 0; cls && depth < 3; depth++, cls = class_getSuperclass(cls)) {
+        unsigned int count = 0;
+        Method *methods = class_copyMethodList(cls, &count);
+        NSMutableArray *selectors = [NSMutableArray array];
+        for (unsigned int index = 0; index < count && selectors.count < 60; index++) {
+            NSString *selector = NSStringFromSelector(method_getName(methods[index]));
+            NSString *lower = selector.lowercaseString;
+            if ([lower containsString:@"success"] || [lower containsString:@"fail"] ||
+                [lower containsString:@"callback"] || [lower containsString:@"result"] ||
+                [lower containsString:@"response"] || [lower containsString:@"invoke"] ||
+                [lower containsString:@"fire"] || [lower containsString:@"send"]) {
+                const char *encoding = method_getTypeEncoding(methods[index]);
+                [selectors addObject:[NSString stringWithFormat:@"%@ (%s)", selector, encoding ?: "?"]];
+            }
+        }
+        free(methods);
+        FMLog([NSString stringWithFormat:@"claim bridge callback class=%@ selectors=%@",
+               NSStringFromClass(cls), selectors]);
+    }
+}
+
 static void FMRecordScriptMessage(NSString *name, id body) {
     if (!FMClaimActive() || [name isEqualToString:@"fmClaimProbe"]) return;
     NSDictionary *dictionary = [body isKindOfClass:NSDictionary.class] ? body : nil;
@@ -295,6 +361,20 @@ static void FMDescribeMtopClasses(void) {
 }
 %end
 
+%hook MtopWVPlugin
+- (void)send:(id)params withCallback:(id)callback withWebView:(id)webView withViewController:(id)viewController {
+    if (FMIsOliverClaimCall(params)) {
+        FMLog([NSString stringWithFormat:@"claim bridge send paramClass=%@ callbackClass=%@ webViewClass=%@",
+               params ? NSStringFromClass([params class]) : @"nil",
+               callback ? NSStringFromClass([callback class]) : @"nil",
+               webView ? NSStringFromClass([webView class]) : @"nil"]);
+        FMDescribeCallback(callback);
+        FMLogClaimDetails(params, webView);
+    }
+    %orig;
+}
+%end
+
 %hook WKScriptMessage
 - (id)body {
     id value = %orig;
@@ -397,7 +477,7 @@ static void FMDescribeMtopClasses(void) {
 
 %ctor {
     if (![NSBundle.mainBundle.bundleIdentifier isEqualToString:@"com.taobao.fleamarket"]) return;
-    FMLog(@"loaded version=0.9.0 stage=read-only bridge call and MTOP error probe");
+    FMLog(@"loaded version=1.0.0 stage=read-only Oliver claim callback and local auth discovery");
     %init;
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         FMDescribeMtopClasses();

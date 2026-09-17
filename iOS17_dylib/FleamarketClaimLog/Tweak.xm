@@ -232,6 +232,29 @@ static BOOL FMIsMarkedClaimRequest(id request) {
     return [objc_getAssociatedObject(request, &FMClaimRequestTag) boolValue];
 }
 
+static void FMLogTBSDKRequest(id request, NSString *stage) {
+    if (!FMClaimActive() || !FMTransportIsClaim(request)) return;
+    id network = FMTransportGetter(request, "networkDataSet");
+    FMLog([NSString stringWithFormat:@"claim tbsdk stage=%@ class=%@ api=%@ url=%@ biz=%@ ext=%@ headers=%@ customHeaders=%@ networkClass=%@",
+           stage, NSStringFromClass([request class]),
+           FMTransportText(FMTransportGetter(request, "apiMethod")),
+           FMTransportText(FMTransportGetter(request, "getRequestURL")),
+           FMTransportText(FMTransportGetter(request, "bizParameters")),
+           FMTransportText(FMTransportGetter(request, "extParameters")),
+           FMTransportText(FMProperty(request, @"httpHeaders")),
+           FMTransportText(FMTransportGetter(request, "custhomHeaders")),
+           network ? NSStringFromClass([network class]) : @"nil"]);
+    if (network) {
+        NSMutableDictionary *fields = [NSMutableDictionary dictionary];
+        for (NSString *key in @[ @"url", @"requestURL", @"HTTPMethod", @"allHTTPHeaderFields",
+                                 @"headers", @"httpHeaders", @"postData", @"body", @"data", @"params" ]) {
+            id value = FMProperty(network, key);
+            if (value) fields[key] = FMTransportText(value);
+        }
+        FMLog([NSString stringWithFormat:@"claim tbsdk stage=%@ networkFields=%@", stage, fields]);
+    }
+}
+
 static NSDictionary *FMResponseSummary(id object) {
     NSMutableDictionary *summary = [FMObjectFields(object) mutableCopy];
     NSString *api = FMSafeValue(FMProperty(object, @"api"));
@@ -690,6 +713,25 @@ static void FMDescribeMtopClasses(void) {
 }
 %end
 
+%hook TBSDKRequest
+- (void)setHTTPRequestHeader {
+    %orig;
+    FMLogTBSDKRequest(self, @"setHTTPRequestHeader");
+}
+- (void)setRequestPostData {
+    %orig;
+    FMLogTBSDKRequest(self, @"setRequestPostData");
+}
+- (void)processSecuritySign {
+    %orig;
+    FMLogTBSDKRequest(self, @"processSecuritySign");
+}
+- (void)afterSignInvoke:(id)result {
+    %orig;
+    FMLogTBSDKRequest(self, @"afterSignInvoke:");
+}
+%end
+
 %hook WKScriptMessage
 - (id)body {
     id value = %orig;
@@ -809,7 +851,7 @@ static void FMDescribeMtopClasses(void) {
 
 %ctor {
     if (![NSBundle.mainBundle.bundleIdentifier isEqualToString:@"com.taobao.fleamarket"]) return;
-    FMLog(@"loaded version=1.6.0 stage=read-only Oliver TBSDK request headers probe");
+    FMLog(@"loaded version=1.7.0 stage=read-only Oliver TBSDK post-sign probe");
     %init;
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         FMDescribeMtopClasses();

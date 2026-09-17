@@ -1,4 +1,6 @@
-# 闲鱼领取诊断 1.6.0
+# 闲鱼领取诊断 1.7.0
+
+1.7.0 uses `TBSDKRequest` method signatures confirmed in the 1.6.0 device log. It records a claim-only snapshot after request-header/body preparation and after security-signing callbacks, including available URL, business/extension parameters, headers, and network-data object fields. It forwards all original calls unchanged. A hook hit after signing is stronger evidence of the final request state, but is still not a packet capture; wire serialization and server-side decisions remain separate questions.
 
 1.6.0 follows the request path confirmed on-device in 1.5.0. It captures the claim-specific `TBSDKServer` URL, params, request headers and underlying `TBSDKRequest` metadata at request/header assignment points, and enumerates `TBSDKRequest` selectors once for the next targeted probe if necessary. The headers seen in 1.5.0 include `x-uid`, `x-utdid`, `x-ua`, and `x-features`; these are device/account metadata, not proof of which server-side rule rejected the claim. The actual final signed network bytes may still differ from these object snapshots.
 

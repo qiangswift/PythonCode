@@ -2,6 +2,9 @@
 
 ## FleamarketClaimLog 1.0.0
 
+- 1.6.0 on-device log (2026-09-17 20:32 GMT+08:00) confirms repeated `TBSDKMTOPServer.addRequestHeader:value:` during the Oliver claim, and `TBSDKRequest` runtime methods `setHTTPRequestHeader`, `setRequestPostData`, `processSecuritySign`, `afterSignInvoke:`, `getRequestURL`, `networkDataSet`, `bizParameters`, `extParameters`, and `custhomHeaders`. `TBSDKServer.setTbsdkRequest:/setRequestHeaders:` did not fire for this claim. Both callbacks still returned `FAIL_BIZ_IDL_COIN_TASK_RMB_CHECK_ERROR`.
+- 1.7.0 hooks only the verified `TBSDKRequest` preparation/signing methods and records claim-matched snapshots after original calls. Actual hook hits, whether headers are post-signing/final, and on-device stability remain pending.
+
 - 1.5.0 on-device log (2026-09-17 18:35 GMT+08:00) confirms the claim construction chain `MtopExtRequest(init-biz)` -> `TBSDKRequest` -> `TBSDKMTOPServer.setRequest:` -> `MtopApiRequest(init-biz/generateMtopRequest)` -> `MtopExtRequest.addHttpHeaders:`. At the last stage, business keys are `deliveryId/asac/sceneId`, extension keys `type/asac/rnd`, and header names include `x-uid/x-utdid/x-ua/x-features` plus locale/referrer values. Both claim callbacks still return `FAIL_BIZ_IDL_COIN_TASK_RMB_CHECK_ERROR`. Header presence does not establish which server-side rule rejected the claim.
 - 1.6.0 hooks confirmed `TBSDKServer.setTbsdkRequest:/setRequestHeaders:` and `TBSDKMTOPServer.addRequestHeader:value:` to inspect scoped server headers and underlying request metadata, and inventories `TBSDKRequest` methods. Final signed wire fields and on-device stability remain unverified.
 

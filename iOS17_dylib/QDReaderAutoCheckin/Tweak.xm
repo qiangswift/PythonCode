@@ -1284,10 +1284,11 @@ static void QDRInstallShelfCheckinControls(QDRShelfNavView *navigationView) {
     if (QDRIsTeenagerAlertController(viewControllerToPresent)) {
         QDRLog(@"auto-completing teenager-mode alert presenter=%@", NSStringFromClass(self.class));
         viewControllerToPresent.view.hidden = YES;
-        %orig(viewControllerToPresent, NO, ^{
+        void (^finishPresentation)(void) = ^{
             if (completion) completion();
             QDRFinishTeenagerController(viewControllerToPresent);
-        });
+        };
+        %orig(viewControllerToPresent, NO, finishPresentation);
         return;
     }
     %orig;

@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.5.12
+
+- Complete the teenager-mode prompt through its native acknowledgement control
+  instead of merely dropping or hiding the presentation.
+- Remove only that prompt's presentation container after dismissal and restore
+  its presenter interaction, preventing a stale dimming layer from blocking the
+  Mine page.
+
 ## 1.5.7
 
 - Permanently remove the bookshelf game entry and reject asynchronous attempts

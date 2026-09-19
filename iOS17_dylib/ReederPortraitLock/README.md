@@ -1,6 +1,7 @@
 # Reeder Portrait Lock
 
-A focused iOS tweak that locks Reeder 5 (`com.reederapp.5.iOS`) to portrait.
+A focused iOS tweak that locks Reeder 4 (`com.reederapp.iOS`) and Reeder 5
+(`com.reederapp.5.iOS`) to portrait.
 It injects only into Reeder and never injects into SpringBoard.
 
 The implementation was informed by static analysis of a user-supplied,

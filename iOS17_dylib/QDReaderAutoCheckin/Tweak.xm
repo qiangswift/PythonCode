@@ -233,13 +233,47 @@ static BOOL QDRIsTeenagerAlertController(UIViewController *controller) {
 static void (*QDRTeenagerOriginalViewWillAppear)(UIViewController *, SEL, BOOL);
 static void (*QDRTeenagerOriginalViewDidAppear)(UIViewController *, SEL, BOOL);
 static BOOL QDRTeenagerLifecycleHookInstalled = NO;
+static char QDRTeenagerFinishedKey;
 
-static void QDRDismissTeenagerController(UIViewController *controller) {
+static UIButton *QDRFindTeenagerAcknowledgeButton(UIView *view) {
+    if (!view) return nil;
+    if ([view isKindOfClass:UIButton.class]) {
+        UIButton *button = (UIButton *)view;
+        NSString *title = [button titleForState:UIControlStateNormal] ?: button.accessibilityLabel;
+        if ([title containsString:@"\u6211\u77e5\u9053\u4e86"] ||
+            [title containsString:@"\u77e5\u9053\u4e86"]) return button;
+    }
+    for (UIView *child in view.subviews) {
+        UIButton *button = QDRFindTeenagerAcknowledgeButton(child);
+        if (button) return button;
+    }
+    return nil;
+}
+
+static void QDRFinishTeenagerController(UIViewController *controller) {
     if (!controller) return;
+    if ([objc_getAssociatedObject(controller, &QDRTeenagerFinishedKey) boolValue]) return;
+    objc_setAssociatedObject(controller, &QDRTeenagerFinishedKey, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    UIView *container = controller.presentationController.containerView;
+    container.hidden = YES;
     controller.view.hidden = YES;
-    controller.presentationController.containerView.hidden = YES;
+    UIButton *acknowledge = QDRFindTeenagerAcknowledgeButton(controller.view);
+    if (acknowledge) {
+        QDRLog(@"completed teenager-mode alert through acknowledge control");
+        [acknowledge sendActionsForControlEvents:UIControlEventTouchUpInside];
+    }
     dispatch_async(dispatch_get_main_queue(), ^{
-        [controller dismissViewControllerAnimated:NO completion:nil];
+        UIViewController *presenter = controller.presentingViewController;
+        void (^cleanup)(void) = ^{
+            container.hidden = YES;
+            [container removeFromSuperview];
+            presenter.view.userInteractionEnabled = YES;
+        };
+        if (controller.presentingViewController) {
+            [controller dismissViewControllerAnimated:NO completion:cleanup];
+        } else {
+            cleanup();
+        }
         if (controller.parentViewController) {
             [controller willMoveToParentViewController:nil];
             [controller.view removeFromSuperview];
@@ -250,13 +284,13 @@ static void QDRDismissTeenagerController(UIViewController *controller) {
 
 static void QDRTeenagerViewWillAppear(UIViewController *controller, SEL selector, BOOL animated) {
     if (QDRTeenagerOriginalViewWillAppear) QDRTeenagerOriginalViewWillAppear(controller, selector, animated);
-    QDRLog(@"suppressed teenager-mode controller in viewWillAppear");
-    QDRDismissTeenagerController(controller);
+    controller.view.hidden = YES;
 }
 
 static void QDRTeenagerViewDidAppear(UIViewController *controller, SEL selector, BOOL animated) {
     if (QDRTeenagerOriginalViewDidAppear) QDRTeenagerOriginalViewDidAppear(controller, selector, animated);
-    QDRDismissTeenagerController(controller);
+    QDRLog(@"finishing teenager-mode controller in viewDidAppear");
+    QDRFinishTeenagerController(controller);
 }
 
 static void QDRInstallTeenagerLifecycleHook(void) {
@@ -1248,8 +1282,12 @@ static void QDRInstallShelfCheckinControls(QDRShelfNavView *navigationView) {
                      animated:(BOOL)animated
                    completion:(void (^)(void))completion {
     if (QDRIsTeenagerAlertController(viewControllerToPresent)) {
-        QDRLog(@"suppressed teenager-mode alert presenter=%@", NSStringFromClass(self.class));
-        if (completion) dispatch_async(dispatch_get_main_queue(), completion);
+        QDRLog(@"auto-completing teenager-mode alert presenter=%@", NSStringFromClass(self.class));
+        viewControllerToPresent.view.hidden = YES;
+        %orig(viewControllerToPresent, NO, ^{
+            if (completion) completion();
+            QDRFinishTeenagerController(viewControllerToPresent);
+        });
         return;
     }
     %orig;

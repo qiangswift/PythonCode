@@ -1,5 +1,17 @@
 # iOS17_dylib 项目交接
 
+## QDReaderAutoCheckin 1.5.12 and ReederPortraitLock 1.0.2
+
+- QDReader teenager-mode handling now allows the native controller to complete
+  a non-animated presentation, activates its native `我知道了` control, dismisses
+  it, removes only its presentation container, and restores presenter input.
+  This replaces the incomplete direct-return/hide behavior that could leave the
+  Mine page dimmed and non-interactive. On-device recurrence testing is pending.
+- ReederPortraitLock now injects into both Reeder 4 `com.reederapp.iOS` and
+  Reeder 5 `com.reederapp.5.iOS`. Its orientation hooks are UIKit-level and do
+  not rely on Reeder 5 classes; Reeder 4 runtime behavior is pending validation.
+- Only RootHide builds are required for both changes.
+
 ## FleamarketClaimLog 1.0.0
 
 - 1.6.0 on-device log (2026-09-17 20:32 GMT+08:00) confirms repeated `TBSDKMTOPServer.addRequestHeader:value:` during the Oliver claim, and `TBSDKRequest` runtime methods `setHTTPRequestHeader`, `setRequestPostData`, `processSecuritySign`, `afterSignInvoke:`, `getRequestURL`, `networkDataSet`, `bizParameters`, `extParameters`, and `custhomHeaders`. `TBSDKServer.setTbsdkRequest:/setRequestHeaders:` did not fire for this claim. Both callbacks still returned `FAIL_BIZ_IDL_COIN_TASK_RMB_CHECK_ERROR`.

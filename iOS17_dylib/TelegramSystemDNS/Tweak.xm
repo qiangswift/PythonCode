@@ -34,7 +34,13 @@ static UIViewController *TSDTelegramRootController(UIViewController *controller)
             return current.navigationController;
         }
     }
-    for (UIWindow *window in UIApplication.sharedApplication.windows) {
+    NSMutableArray<UIWindow *> *windows = [NSMutableArray array];
+    for (UIScene *scene in UIApplication.sharedApplication.connectedScenes) {
+        if ([scene isKindOfClass:UIWindowScene.class]) {
+            [windows addObjectsFromArray:((UIWindowScene *)scene).windows];
+        }
+    }
+    for (UIWindow *window in windows) {
         NSMutableArray<UIViewController *> *queue = [NSMutableArray array];
         if (window.rootViewController) [queue addObject:window.rootViewController];
         while (queue.count != 0) {

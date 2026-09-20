@@ -1,7 +1,7 @@
 Package: com.swiftss.telegramsystemdns
 Name: Telegram System DNS
-Version: 1.1.0
-Architecture: iphoneos-arm64e
+Version: 1.1.1
+Architecture: iphoneos-arm
 Description: Adds system DNS proxy resolution and a simplified Telegram home screen.
 Maintainer: swiftss
 Author: swiftss

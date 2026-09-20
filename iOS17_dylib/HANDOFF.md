@@ -1,6 +1,6 @@
 # iOS17_dylib 项目交接
 
-## TelegramSystemDNS 1.1.0
+## TelegramSystemDNS 1.1.1
 
 - Telegram 12.9.3 的代理主机名默认经 `MTDNS`
   `resolveHostnameUniversal:port:` 解析；Swiftgram 的 `Use system DNS`
@@ -10,6 +10,8 @@
 - 仅构建 RootHide；设备上的设置页布局和真实代理解析尚待验证。
 - Telegram 首页默认隐藏底部 Contacts / Calls / Chats / Settings 栏和搜索控件；
   右上角 `+` 直接选中 Telegram 原生设置控制器。
+- 1.1.1 新增普通 rootless `iphoneos-arm64` 包，用于 TrollFools 提取 dylib 注入；
+  RootHide 包仍保留给 Sileo/RootHide 环境。
 
 ## QDReaderAutoCheckin 1.5.12 and ReederPortraitLock 1.0.2
 

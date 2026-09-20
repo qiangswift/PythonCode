@@ -6,11 +6,179 @@
 
 static NSString *const TSDEnabledKey = @"com.swiftss.telegramsystemdns.enabled";
 static const void *TSDPanelKey = &TSDPanelKey;
+static const void *TSDSettingsButtonKey = &TSDSettingsButtonKey;
 static IMP TSDOriginalResolveUniversal = NULL;
 static BOOL TSDDNSHookInstalled = NO;
 
 static BOOL TSDIsEnabled(void) {
     return [NSUserDefaults.standardUserDefaults boolForKey:TSDEnabledKey];
+}
+
+static id TSDValueForKey(id object, NSString *key) {
+    if (!object) return nil;
+    @try {
+        return [object valueForKey:key];
+    } @catch (__unused NSException *exception) {
+        return nil;
+    }
+}
+
+static BOOL TSDClassNameContains(id object, NSString *fragment) {
+    return object && [NSStringFromClass([object class]) containsString:fragment];
+}
+
+static UIViewController *TSDTelegramRootController(UIViewController *controller) {
+    for (UIViewController *current = controller; current; current = current.parentViewController) {
+        if (TSDClassNameContains(current, @"TelegramRootController")) return current;
+        if (TSDClassNameContains(current.navigationController, @"TelegramRootController")) {
+            return current.navigationController;
+        }
+    }
+    for (UIWindow *window in UIApplication.sharedApplication.windows) {
+        NSMutableArray<UIViewController *> *queue = [NSMutableArray array];
+        if (window.rootViewController) [queue addObject:window.rootViewController];
+        while (queue.count != 0) {
+            UIViewController *current = queue.firstObject;
+            [queue removeObjectAtIndex:0];
+            if (TSDClassNameContains(current, @"TelegramRootController")) return current;
+            if (current.presentedViewController) [queue addObject:current.presentedViewController];
+            [queue addObjectsFromArray:current.childViewControllers];
+        }
+    }
+    return nil;
+}
+
+static void TSDOpenTelegramSettings(UIViewController *source) {
+    UIViewController *root = TSDTelegramRootController(source);
+    id tabController = TSDValueForKey(root, @"rootTabController");
+    id settingsController = TSDValueForKey(root, @"accountSettingsController");
+    NSArray *controllers = TSDValueForKey(tabController, @"controllers");
+    NSUInteger index = [controllers indexOfObjectIdenticalTo:settingsController];
+    SEL selector = NSSelectorFromString(@"setSelectedIndex:");
+    if (index != NSNotFound && [tabController respondsToSelector:selector]) {
+        ((void (*)(id, SEL, NSInteger))objc_msgSend)(tabController, selector, (NSInteger)index);
+    }
+}
+
+static BOOL TSDIsHomeController(UIViewController *controller) {
+    return TSDClassNameContains(controller, @"ChatListControllerImpl");
+}
+
+static BOOL TSDIsSearchText(NSString *text) {
+    if (![text isKindOfClass:NSString.class]) return NO;
+    NSString *lower = text.lowercaseString;
+    return [lower containsString:@"search"] || [text containsString:@"搜索"];
+}
+
+static void TSDHideSearchControls(UIView *view, UIView *rootView) {
+    for (UIView *child in view.subviews) {
+        CGRect frame = [child convertRect:child.bounds toView:rootView];
+        NSString *label = child.accessibilityLabel;
+        if (TSDIsSearchText(label) && CGRectGetMidY(frame) < rootView.safeAreaInsets.top + 90.0) {
+            child.hidden = YES;
+        } else {
+            TSDHideSearchControls(child, rootView);
+        }
+    }
+}
+
+static BOOL TSDIsTabTitle(NSString *text) {
+    if (![text isKindOfClass:NSString.class]) return NO;
+    static NSSet<NSString *> *titles;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        titles = [NSSet setWithArray:@[@"contacts", @"calls", @"chats", @"settings",
+            @"联系人", @"通讯录", @"通话", @"聊天", @"设置"]];
+    });
+    return [titles containsObject:text.lowercaseString];
+}
+
+static void TSDCollectTabLabels(UIView *view, UIView *rootView, NSMutableArray<UIView *> *result) {
+    for (UIView *child in view.subviews) {
+        if ([child isKindOfClass:UILabel.class] && TSDIsTabTitle(((UILabel *)child).text)) {
+            CGRect frame = [child convertRect:child.bounds toView:rootView];
+            if (CGRectGetMidY(frame) > CGRectGetHeight(rootView.bounds) - 130.0) {
+                [result addObject:child];
+            }
+        }
+        TSDCollectTabLabels(child, rootView, result);
+    }
+}
+
+static UIView *TSDCommonAncestor(UIView *first, UIView *second) {
+    NSMutableSet<NSValue *> *ancestors = [NSMutableSet set];
+    for (UIView *view = first; view; view = view.superview) {
+        [ancestors addObject:[NSValue valueWithNonretainedObject:view]];
+    }
+    for (UIView *view = second; view; view = view.superview) {
+        if ([ancestors containsObject:[NSValue valueWithNonretainedObject:view]]) return view;
+    }
+    return nil;
+}
+
+static void TSDHideBottomTabBar(UIViewController *controller) {
+    UIViewController *root = TSDTelegramRootController(controller);
+    id tabController = TSDValueForKey(root, @"rootTabController");
+    UIView *rootView = [tabController isKindOfClass:UIViewController.class]
+        ? ((UIViewController *)tabController).view : nil;
+    if (!rootView) return;
+
+    NSMutableArray<UIView *> *labels = [NSMutableArray array];
+    TSDCollectTabLabels(rootView, rootView, labels);
+    if (labels.count < 2) return;
+    UIView *common = TSDCommonAncestor(labels[0], labels[1]);
+    for (NSUInteger i = 2; common && i < labels.count; i++) {
+        common = TSDCommonAncestor(common, labels[i]);
+    }
+    if (!common || common == rootView) return;
+    CGRect frame = [common convertRect:common.bounds toView:rootView];
+    if (CGRectGetHeight(frame) <= 150.0 && CGRectGetMaxY(frame) >= CGRectGetHeight(rootView.bounds) - 10.0) {
+        common.hidden = YES;
+        common.userInteractionEnabled = NO;
+    }
+}
+
+@interface TSDHomeTarget : NSObject
+@property (nonatomic, weak) UIViewController *controller;
+- (void)openSettings:(id)sender;
+@end
+
+@implementation TSDHomeTarget
+- (void)openSettings:(id)sender {
+    TSDOpenTelegramSettings(self.controller);
+}
+@end
+
+
+static void TSDInstallHomeButton(UIViewController *controller) {
+    if (!TSDIsHomeController(controller) || !controller.view.window) return;
+    TSDHideSearchControls(controller.view, controller.view);
+    TSDHideBottomTabBar(controller);
+
+    UIButton *button = objc_getAssociatedObject(controller, TSDSettingsButtonKey);
+    if (!button) {
+        button = [UIButton buttonWithType:UIButtonTypeSystem];
+        button.translatesAutoresizingMaskIntoConstraints = NO;
+        button.tintColor = UIColor.labelColor;
+        UIImage *image = [UIImage systemImageNamed:@"plus" withConfiguration:
+            [UIImageSymbolConfiguration configurationWithPointSize:23.0 weight:UIImageSymbolWeightRegular]];
+        [button setImage:image forState:UIControlStateNormal];
+        button.accessibilityLabel = @"Settings";
+        TSDHomeTarget *target = [TSDHomeTarget new];
+        target.controller = controller;
+        [button addTarget:target action:@selector(openSettings:) forControlEvents:UIControlEventTouchUpInside];
+        objc_setAssociatedObject(button, @selector(openSettings:), target, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        [controller.view addSubview:button];
+        [NSLayoutConstraint activateConstraints:@[
+            [button.trailingAnchor constraintEqualToAnchor:controller.view.safeAreaLayoutGuide.trailingAnchor constant:-8.0],
+            [button.topAnchor constraintEqualToAnchor:controller.view.safeAreaLayoutGuide.topAnchor constant:2.0],
+            [button.widthAnchor constraintEqualToConstant:44.0],
+            [button.heightAnchor constraintEqualToConstant:44.0]
+        ]];
+        objc_setAssociatedObject(controller, TSDSettingsButtonKey, button, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    }
+    button.hidden = NO;
+    [controller.view bringSubviewToFront:button];
 }
 
 static id TSDResolveUniversal(id self, SEL selector, NSString *hostname, int32_t port) {
@@ -169,17 +337,21 @@ static void TSDInstallPanel(UIViewController *controller) {
 - (void)viewDidAppear:(BOOL)animated {
     %orig;
     TSDInstallPanel(self);
+    TSDInstallHomeButton(self);
 }
 
 - (void)viewDidLayoutSubviews {
     %orig;
     TSDPanel *panel = objc_getAssociatedObject(self, TSDPanelKey);
     if (panel) [self.view bringSubviewToFront:panel];
+    if (TSDIsHomeController(self)) TSDInstallHomeButton(self);
 }
 
 - (void)viewWillDisappear:(BOOL)animated {
     %orig;
     TSDRemovePanel(self);
+    UIButton *button = objc_getAssociatedObject(self, TSDSettingsButtonKey);
+    button.hidden = YES;
 }
 %end
 

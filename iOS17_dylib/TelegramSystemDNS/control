@@ -1,0 +1,9 @@
+Package: com.swiftss.telegramsystemdns
+Name: Telegram System DNS
+Version: 1.0.0
+Architecture: iphoneos-arm64e
+Description: Adds a Use system DNS option to Telegram proxy settings.
+Maintainer: swiftss
+Author: swiftss
+Section: Tweaks
+Depends: mobilesubstrate

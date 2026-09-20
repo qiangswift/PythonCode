@@ -1,5 +1,14 @@
 # iOS17_dylib 项目交接
 
+## TelegramSystemDNS 1.0.0
+
+- Telegram 12.9.3 的代理主机名默认经 `MTDNS`
+  `resolveHostnameUniversal:port:` 解析；Swiftgram 的 `Use system DNS`
+  开关实际改用 `resolveHostnameNative:port:`。
+- 新插件在 Telegram 代理页添加同名开关，开启时仅改变 SOCKS5/MTProxy
+  域名的解析路径，数字 IP 和普通数据中心连接不受影响。
+- 仅构建 RootHide；设备上的设置页布局和真实代理解析尚待验证。
+
 ## QDReaderAutoCheckin 1.5.12 and ReederPortraitLock 1.0.2
 
 - QDReader teenager-mode handling now allows the native controller to complete
